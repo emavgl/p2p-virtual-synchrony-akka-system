@@ -10,9 +10,6 @@ import it.unitn.ds1.Actors.GroupManager;
 public class Run {
 
     public static void main(String[] args) {
-
-        System.out.println(args);
-
         // Load the configuration file
         Config config = ConfigFactory.load();
         String remotePath = null;

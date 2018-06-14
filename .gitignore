@@ -34,4 +34,7 @@ proguard/
 build/
 bin/
 out/
+
+#Project
+*_*.conf
  
