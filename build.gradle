@@ -21,4 +21,7 @@ mainClassName = "it.unitn.ds1.Run"
 run {
     standardInput = System.in
     systemProperty "config.resource", System.getProperty("config")
+    if (project.hasProperty("appArgs")) {
+        args Eval.me(appArgs)
+    }
 }
