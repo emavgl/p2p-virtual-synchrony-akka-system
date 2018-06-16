@@ -1,29 +1,42 @@
 package it.unitn.ds1.Actors;
 import java.io.Serializable;
-import java.util.Collection;
-import java.util.Map;
-import java.util.HashMap;
+import java.util.*;
 
 import akka.actor.ActorRef;
 import akka.actor.AbstractActor;
 import akka.actor.Props;
 
 import it.unitn.ds1.Messages.*;
+import it.unitn.ds1.Models.State;
+import it.unitn.ds1.Models.View;
+import org.apache.log4j.Logger;
 
 /**
     Actor class
  */
 public class Actor extends AbstractActor {
 
+		protected static final Logger logger = Logger.getLogger("DS1");
+
 		// The table of all nodes in the system id->ref
-		protected Map<Integer, ActorRef> nodes = new HashMap<>();
+		protected View view;
+		protected View proposedView;
+
 		protected String groupManagerHostPath = null;
-		protected int id = -1;
+		protected int id;
 		protected int contentCounter = 0;
+		protected State state;
+		protected Set<ChatMessage> msgBuffer;
+		protected HashMap<Integer, Set<Integer>> flushes;
 
 		/* -- Actor constructor --------------------------------------------------- */
 		public Actor(String groupManagerHostPath) {
 			this.groupManagerHostPath = groupManagerHostPath;
+			this.view = null;
+			this.msgBuffer = new HashSet<>();
+			this.id = -(int)(Math.random() * 1000);
+			this.state = State.PAUSE;
+			this.flushes = new HashMap<> ();
 		}
 
 		/**
@@ -38,61 +51,89 @@ public class Actor extends AbstractActor {
 		 */
 		@Override
 		public void preStart() {
-			if (this.id == -1 ) {
-				System.out.println("Id not assigned");
-				getContext().actorSelection(groupManagerHostPath).tell(new RequestIDMessage(), getSelf());
-			} else if (this.id > 0) {
-				this.nodes.put(this.id, getSelf());
-				System.out.println("Id assigned" + this.id);
-				getContext().actorSelection(this.groupManagerHostPath).tell(new RequestNodelist(), getSelf());
+			if (this.id < 0 ) {
+				logger.info(String.format("[%d] - %s", this.id, "Node started"));
+				logger.info(String.format("[%d] - [-> 0] join request ", this.id));
+				getContext().actorSelection(groupManagerHostPath).tell(new RequestJoinMessage(this.id), getSelf());
+			}
+			run();
+		}
+
+		protected void onViewChangeMessage(ViewChangeMessage message) {
+			logger.info(String.format("[%d] - [<- 0] request new view %d", this.id,
+					message.view.getId()));
+			this.state = State.PAUSE;
+			this.proposedView = message.view;
+
+			if (this.msgBuffer.size() > 0){
+				// Or we are a new node
+				// Or we don't have msg in the buffer
+				sendUnstableMessages();
+			}
+
+			sendFlush();
+		}
+
+
+		protected void sendUnstableMessages() {
+			for (ChatMessage m : this.msgBuffer){
+				multicast(m, this.view.getMembers().values());
 			}
 		}
 
-		/**
-			Callback on receiving of RequestNodeList
-			returns the this.nodes
-		 */
-		protected void onRequestNodelist(RequestNodelist message) {
-			getSender().tell(new Nodelist(nodes), getSelf());
+		protected void sendFlush(){
+			logger.info(String.format("[%d] - [-> %s] flush for view %d",
+					this.id, this.proposedView.getMembers().keySet().toString(), this.proposedView.getId()));
+			multicast(new FlushMessage(this.id, this.proposedView.getId()), this.proposedView.getMembers().values());
 		}
 
-		/**
-			Callback on receiving of NodeList Message
-			Update its local node list with the receiving one
-			Then, sends a Join message to everyone in that list
-		 */
-		protected void onNodelist(Nodelist message) {
-			nodes.putAll(message.nodes);
-			for (ActorRef n: nodes.values()) {
-				n.tell(new Join(this.id), getSelf());
+		protected void run(){
+			int i = 0;
+			while (i < 2){
+				switch (this.state){
+					case NORMAL:
+						sendMulticastMessage();
+						break;
+					case PAUSE:
+						break;
+					case CRASHED:
+						break;
+				}
+				randomSleep();
+				i++;
 			}
 		}
 
-		/**
-			Callback on receiving of the Join message
-			Add the joining node to its local list of nodes
-		 */
-		protected void onJoin(Join message) {
-			int id = message.id;
-			System.out.println("Node " + id + " joined");
-			nodes.put(id, getSender());
-			// Here ends the start configuration of each new node who is joining in the group
-            startChat();
+		protected void installView(View v){
+			this.view = new View(v.getId(), v.getMembers());
+			this.proposedView = null;
+			this.flushes.clear();
+			logger.info(String.format("[%d] - install view %d %s", this.id, this.view.getId(),
+					this.view.getMembers().keySet().toString()));
 		}
 
-		protected void startChat(){
-		    // Create a new unique content for this.id
-            ChatMessage m = new ChatMessage(contentCounter, this.id);
-            this.sendMulticastMessage(m, this.nodes.values());
-            System.out.println("I (" + this.id + ") have sent a new message with the content " + contentCounter);
-			contentCounter++;
+		protected void sendMulticastMessage(){
+			this.contentCounter++;
+			logger.info(String.format("[%d] - [-> %s] send chatmsg %d within %d",
+					this.id, this.view.getMembers().keySet().toString(),
+					this.contentCounter, this.view.getId()));
+			ChatMessage m = new ChatMessage(this.id, this.contentCounter);
+			multicast(m, this.view.getMembers().values());
         }
 
-        protected void onChatMessage(ChatMessage msg){
-            System.out.println("I (" + this.id + ") have RECEIVED " +  msg.content  + " from " + msg.senderId );
+        protected void onChatMessage(ChatMessage message){
+			if (this.view == null) return; // Joining node - Ignores incoming unstable message
+			logger.info(String.format("[%d] - [<- %d] ChatMessage %d", this.id, message.senderId, message.content));
+			boolean added = this.msgBuffer.add(message);
+			if (added) this.deliverMessage(message);
         }
 
-        protected void sendMulticastMessage(Serializable m, Collection<ActorRef> participants) {
+        protected void deliverMessage(ChatMessage message){
+			logger.info(String.format("[%d] - [<- %d] deliver chatmsg %d within %d", this.id,
+					message.senderId, message.content, this.view.getId()));
+		}
+
+        protected void multicast(Serializable m, Collection<ActorRef> participants) {
 			for (ActorRef p: participants) {
 				p.tell(m, getSelf());
 				randomSleep();
@@ -109,9 +150,20 @@ public class Actor extends AbstractActor {
 		}
 
 		private void onNewIDMessage(NewIDMessage message) {
+			logger.info(String.format("[%d] - [<- %d] new id %d", this.id, message.senderId, message.id));
 			this.id = message.id;
-			// Recall preStart
-			this.preStart();
+		}
+
+		protected void onFlushMessage(FlushMessage message){
+			logger.info(String.format("[%d] - [<- %d] flush for view %d",
+					this.id, message.senderId, message.proposedViewId));
+			Set<Integer> s = this.flushes.get(message.proposedViewId);
+			if (s == null) this.flushes.put(message.proposedViewId, new HashSet<>());
+			this.flushes.get(message.proposedViewId).add(message.senderId);
+			if (this.proposedView != null){
+				boolean complete = this.flushes.get(this.proposedView.getId()).equals(this.proposedView.getMembers().keySet());
+				if (complete) this.installView(this.proposedView);
+			}
 		}
 
 	/**
@@ -121,12 +173,12 @@ public class Actor extends AbstractActor {
 		public Receive createReceive() {
 		return receiveBuilder()
 			.match(NewIDMessage.class, this::onNewIDMessage)
-			.match(RequestNodelist.class, this::onRequestNodelist)
-			.match(Nodelist.class, this::onNodelist)
-            .match(ChatMessage.class, this::onChatMessage)
-			.match(Join.class, this::onJoin)
+			.match(ViewChangeMessage.class, this::onViewChangeMessage)
+			.match(ChatMessage.class, this::onChatMessage)
+			.match(FlushMessage.class, this::onFlushMessage)
 			.build();
 		}
+
 
 
 }

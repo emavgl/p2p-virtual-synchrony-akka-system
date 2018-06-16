@@ -3,6 +3,10 @@ package it.unitn.ds1.Actors;
 import akka.actor.ActorRef;
 import akka.actor.Props;
 import it.unitn.ds1.Messages.*;
+import it.unitn.ds1.Models.View;
+
+import java.util.HashMap;
+import java.util.Map;
 
 public class GroupManager extends Actor {
 
@@ -17,7 +21,8 @@ public class GroupManager extends Actor {
     @Override
     public void preStart() {
         super.preStart();
-        this.nodes.put(this.id, getSelf());
+        View firstView = new View(0).addNode(this.id, getSelf());
+        this.installView(firstView);
     }
 
     /**
@@ -28,9 +33,23 @@ public class GroupManager extends Actor {
     }
 
 
-    private void onRequestIDMessage(RequestIDMessage message) {
+    private void onRequestJoinMessage(RequestJoinMessage message) {
+        logger.info(String.format("[%d] - [<- %d] join request at view %d", this.id, message.senderId,
+                this.view.getId()));
+
         ActorRef sender = getSender();
-        sender.tell(new NewIDMessage(memberIdCounter++), getSelf());
+        int newId = memberIdCounter;
+
+        logger.info(String.format("[%d] - [-> %d] new ID %d", this.id, message.senderId, newId));
+        sender.tell(new NewIDMessage(this.id, memberIdCounter++), getSelf());
+
+        View newView = this.view.addNode(newId, sender);
+
+        logger.info(String.format("[%d] - [-> %s] request new view %d", this.id,
+                newView.getMembers().keySet().toString(),
+                newView.getId()
+                ));
+        multicast(new ViewChangeMessage(this.id, newView), newView.getMembers().values());
     }
 
     /**
@@ -39,11 +58,10 @@ public class GroupManager extends Actor {
     @Override
     public Receive createReceive() {
         return receiveBuilder()
-                .match(RequestIDMessage.class, this::onRequestIDMessage)
-                .match(RequestNodelist.class, this::onRequestNodelist)
-                .match(Nodelist.class, this::onNodelist)
+                .match(RequestJoinMessage.class, this::onRequestJoinMessage)
+                .match(ViewChangeMessage.class, this::onViewChangeMessage)
                 .match(ChatMessage.class, this::onChatMessage)
-                .match(Join.class, this::onJoin)
+                .match(FlushMessage.class, this::onFlushMessage)
                 .build();
     }
 }
