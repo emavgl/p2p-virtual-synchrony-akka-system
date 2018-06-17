@@ -1,6 +1,7 @@
 package it.unitn.ds1.Actors;
 import java.io.Serializable;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 
 import akka.actor.ActorRef;
 import akka.actor.AbstractActor;
@@ -10,11 +11,12 @@ import it.unitn.ds1.Messages.*;
 import it.unitn.ds1.Models.State;
 import it.unitn.ds1.Models.View;
 import org.apache.log4j.Logger;
+import scala.concurrent.duration.Duration;
 
 /**
     Actor class
  */
-public class Actor extends AbstractActor {
+public abstract class Actor extends AbstractActor {
 
 		protected static final Logger logger = Logger.getLogger("DS1");
 
@@ -32,34 +34,106 @@ public class Actor extends AbstractActor {
 		/* -- Actor constructor --------------------------------------------------- */
 		public Actor(String groupManagerHostPath) {
 			this.groupManagerHostPath = groupManagerHostPath;
+			this.init();
+		}
+
+		protected void init(){
 			this.view = null;
+			this.state = State.INIT;
 			this.msgBuffer = new HashSet<>();
-			this.id = -(int)(Math.random() * 1000);
-			this.state = State.PAUSE;
 			this.flushes = new HashMap<> ();
 		}
 
-		/**
-			Akka - Build from constructor
-		 */
-		static public Props props(String remotePath) {
-			return Props.create(Actor.class, () -> new Actor(remotePath));
-		}
-
-		/**
-			Ask to itself for the NodeList and add itself as a new node in its local list
-		 */
-		@Override
-		public void preStart() {
-			if (this.id < 0 ) {
-				logger.info(String.format("[%d] - %s", this.id, "Node started"));
-				logger.info(String.format("[%d] - [-> 0] join request ", this.id));
-				getContext().actorSelection(groupManagerHostPath).tell(new RequestJoinMessage(this.id), getSelf());
+		/*
+		* RUN
+		* */
+		protected void run(){
+			switch (this.state){
+				case NORMAL:
+					if (this.contentCounter > 3) break;
+					if (this.view.getMembers().size() > 1){
+						sendMulticastMessage();
+					}
+					break;
+				case PAUSE:
+					break;
+				case CRASHED:
+					break;
+				case INIT:
+					break;
 			}
-			run();
+			randomSleep();
 		}
 
+		/*
+		* Sending and Receiving Helper functions
+		* */
+		protected void sendUnstableMessages() {
+			for (ChatMessage m : this.msgBuffer){
+				multicast(m, this.view.getMembers().values());
+			}
+		}
+		protected void sendFlush(){
+			logger.info(String.format("[%d] - [-> %s] flush for view %d",
+					this.id, this.proposedView.getMembers().keySet().toString(), this.proposedView.getId()));
+
+			this.flushes.put(this.proposedView.getId(), new HashSet<>());
+			multicast(new FlushMessage(this.id, this.proposedView.getId()), this.proposedView.getMembers().values());
+		}
+		protected void installView(View v){
+			this.view = new View(v.getId(), v.getMembers());
+			this.proposedView = null;
+			this.flushes.clear();
+			logger.info(String.format("[%d] - install view %d %s", this.id, this.view.getId(),
+					this.view.getMembers().keySet().toString()));
+			this.state = State.NORMAL;
+			this.run();
+		}
+		protected void sendMulticastMessage(){
+			this.contentCounter++;
+			logger.info(String.format("[%d] - [-> %s] send chatmsg %d within %d",
+					this.id, this.view.getMembers().keySet().toString(),
+					this.contentCounter, this.view.getId()));
+			ChatMessage m = new ChatMessage(this.id, this.contentCounter);
+			multicast(m, this.view.getMembers().values());
+        }
+        protected void deliverMessage(ChatMessage message){
+			logger.info(String.format("[%d] - [<- %d] deliver chatmsg %d within %d", this.id,
+					message.senderId, message.content, this.view.getId()));
+		}
+        protected void multicast(Serializable m, Collection<ActorRef> participants) {
+			for (ActorRef p: participants) {
+				p.tell(m, getSelf());
+				this.crash(10000);
+				randomSleep();
+			}
+        }
+		protected void randomSleep() {
+			long randomSleepTime = (long)(Math.random()*1000);
+			try {
+				Thread.sleep(randomSleepTime);
+			} catch (InterruptedException e) {
+				e.printStackTrace();
+			}
+		}
+
+
+		protected void crash(long recoveryTime) {
+			// Cannot crash on class actor
+		}
+
+		/*
+		* CALLBACKS
+		* */
+		protected void onNewIDMessage(NewIDMessage message) {
+			if (this.state == State.CRASHED) return;
+
+			logger.info(String.format("[%d] - [<- %d] new id %d", this.id, message.senderId, message.id));
+			this.id = message.id;
+		}
 		protected void onViewChangeMessage(ViewChangeMessage message) {
+			if (this.state == State.CRASHED) return;
+
 			logger.info(String.format("[%d] - [<- 0] request new view %d", this.id,
 					message.view.getId()));
 			this.state = State.PAUSE;
@@ -73,100 +147,38 @@ public class Actor extends AbstractActor {
 
 			sendFlush();
 		}
-
-
-		protected void sendUnstableMessages() {
-			for (ChatMessage m : this.msgBuffer){
-				multicast(m, this.view.getMembers().values());
-			}
-		}
-
-		protected void sendFlush(){
-			logger.info(String.format("[%d] - [-> %s] flush for view %d",
-					this.id, this.proposedView.getMembers().keySet().toString(), this.proposedView.getId()));
-			multicast(new FlushMessage(this.id, this.proposedView.getId()), this.proposedView.getMembers().values());
-		}
-
-		protected void run(){
-			int i = 0;
-			while (i < 2){
-				switch (this.state){
-					case NORMAL:
-						sendMulticastMessage();
-						break;
-					case PAUSE:
-						break;
-					case CRASHED:
-						break;
-				}
-				randomSleep();
-				i++;
-			}
-		}
-
-		protected void installView(View v){
-			this.view = new View(v.getId(), v.getMembers());
-			this.proposedView = null;
-			this.flushes.clear();
-			logger.info(String.format("[%d] - install view %d %s", this.id, this.view.getId(),
-					this.view.getMembers().keySet().toString()));
-		}
-
-		protected void sendMulticastMessage(){
-			this.contentCounter++;
-			logger.info(String.format("[%d] - [-> %s] send chatmsg %d within %d",
-					this.id, this.view.getMembers().keySet().toString(),
-					this.contentCounter, this.view.getId()));
-			ChatMessage m = new ChatMessage(this.id, this.contentCounter);
-			multicast(m, this.view.getMembers().values());
-        }
-
-        protected void onChatMessage(ChatMessage message){
-			if (this.view == null) return; // Joining node - Ignores incoming unstable message
-			logger.info(String.format("[%d] - [<- %d] ChatMessage %d", this.id, message.senderId, message.content));
-			boolean added = this.msgBuffer.add(message);
-			if (added) this.deliverMessage(message);
-        }
-
-        protected void deliverMessage(ChatMessage message){
-			logger.info(String.format("[%d] - [<- %d] deliver chatmsg %d within %d", this.id,
-					message.senderId, message.content, this.view.getId()));
-		}
-
-        protected void multicast(Serializable m, Collection<ActorRef> participants) {
-			for (ActorRef p: participants) {
-				p.tell(m, getSelf());
-				randomSleep();
-			}
-        }
-
-		protected void randomSleep() {
-			long randomSleepTime = (long)(Math.random()*1000);
-			try {
-				Thread.sleep(randomSleepTime);
-			} catch (InterruptedException e) {
-				e.printStackTrace();
-			}
-		}
-
-		private void onNewIDMessage(NewIDMessage message) {
-			logger.info(String.format("[%d] - [<- %d] new id %d", this.id, message.senderId, message.id));
-			this.id = message.id;
-		}
-
 		protected void onFlushMessage(FlushMessage message){
+			if (this.state == State.CRASHED) return;
+
 			logger.info(String.format("[%d] - [<- %d] flush for view %d",
-					this.id, message.senderId, message.proposedViewId));
+						this.id, message.senderId, message.proposedViewId));
+
 			Set<Integer> s = this.flushes.get(message.proposedViewId);
 			if (s == null) this.flushes.put(message.proposedViewId, new HashSet<>());
 			this.flushes.get(message.proposedViewId).add(message.senderId);
+
 			if (this.proposedView != null){
-				boolean complete = this.flushes.get(this.proposedView.getId()).equals(this.proposedView.getMembers().keySet());
+				Set<Integer> requestReceivedForProposedView = this.flushes.get(this.proposedView.getId());
+				boolean complete = requestReceivedForProposedView.equals(this.proposedView.getMembers().keySet());
 				if (complete) this.installView(this.proposedView);
 			}
 		}
+		protected void onHeartBeatMessage(HeartBeatMessage message) {
+			if (this.state == State.CRASHED) return;
 
-	/**
+			HeartBeatMessage hbm = new HeartBeatMessage(this.id);
+			getSender().tell(hbm, getSelf());
+		}
+		protected void onChatMessage(ChatMessage message){
+			if (this.state == State.CRASHED) return;
+
+			if (this.view == null) return; // Joining node - Ignores incoming unstable message
+			boolean added = this.msgBuffer.add(message);
+			if (added) this.deliverMessage(message);
+			run();
+		}
+
+		/**
 			Registers callbacks
 		 */
 		@Override
@@ -176,6 +188,7 @@ public class Actor extends AbstractActor {
 			.match(ViewChangeMessage.class, this::onViewChangeMessage)
 			.match(ChatMessage.class, this::onChatMessage)
 			.match(FlushMessage.class, this::onFlushMessage)
+			.match(HeartBeatMessage.class, this::onHeartBeatMessage)
 			.build();
 		}
 

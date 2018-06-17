@@ -6,6 +6,7 @@ import com.typesafe.config.Config;
 import com.typesafe.config.ConfigFactory;
 import it.unitn.ds1.Actors.Actor;
 import it.unitn.ds1.Actors.GroupManager;
+import it.unitn.ds1.Actors.GroupMember;
 
 public class Run {
 
@@ -27,7 +28,7 @@ public class Run {
 
             // Create a single node actor locally
             final ActorRef receiver = system.actorOf(
-                    Actor.props(remotePath),
+                    GroupMember.props(remotePath),
                     "node"      // actor name
             );
         }
