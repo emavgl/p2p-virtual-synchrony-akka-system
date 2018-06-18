@@ -30,6 +30,8 @@ public abstract class Actor extends AbstractActor {
 		protected State state;
 		protected Set<ChatMessage> msgBuffer;
 		protected HashMap<Integer, Set<Integer>> flushes;
+		protected Thread keyListenerThread;
+		protected Thread runThread;
 
 		/* -- Actor constructor --------------------------------------------------- */
 		public Actor(String groupManagerHostPath) {
@@ -42,15 +44,36 @@ public abstract class Actor extends AbstractActor {
 			this.state = State.INIT;
 			this.msgBuffer = new HashSet<>();
 			this.flushes = new HashMap<> ();
+			this.keyListenerThread  = new Thread(() -> {
+				while (true){
+					Scanner keyboard = new Scanner(System.in);
+					boolean exit = false;
+					while (!exit) {
+						String input = keyboard.next();
+						if(input != null) {
+							if ("c".equals(input)) {
+								System.out.println("Key pressed, crash mode on");
+								this.crash(100000);
+							} else if ("x".equals(input)) {
+								//Do something
+							}
+						}
+					}
+					keyboard.close();
+				}
+			});
 		}
 
-		/*
+		@Override
+		public void preStart() {
+		}
+
+	/*
 		* RUN
 		* */
 		protected void run(){
 			switch (this.state){
 				case NORMAL:
-					if (this.contentCounter > 3) break;
 					if (this.view.getMembers().size() > 1){
 						sendMulticastMessage();
 					}
@@ -80,7 +103,9 @@ public abstract class Actor extends AbstractActor {
 			this.flushes.put(this.proposedView.getId(), new HashSet<>());
 			multicast(new FlushMessage(this.id, this.proposedView.getId()), this.proposedView.getMembers().values());
 		}
+
 		protected void installView(View v){
+			this.state = State.PAUSE;
 			this.view = new View(v.getId(), v.getMembers());
 			this.proposedView = null;
 			this.flushes.clear();
@@ -89,27 +114,40 @@ public abstract class Actor extends AbstractActor {
 			this.state = State.NORMAL;
 			this.run();
 		}
+
 		protected void sendMulticastMessage(){
 			this.contentCounter++;
 			logger.info(String.format("[%d] - [-> %s] send chatmsg %d within %d",
 					this.id, this.view.getMembers().keySet().toString(),
 					this.contentCounter, this.view.getId()));
 			ChatMessage m = new ChatMessage(this.id, this.contentCounter);
-			multicast(m, this.view.getMembers().values());
+			this.multicast(m, this.view.getMembers());
         }
+
         protected void deliverMessage(ChatMessage message){
 			logger.info(String.format("[%d] - [<- %d] deliver chatmsg %d within %d", this.id,
 					message.senderId, message.content, this.view.getId()));
+			this.run();
 		}
+
         protected void multicast(Serializable m, Collection<ActorRef> participants) {
 			for (ActorRef p: participants) {
 				p.tell(m, getSelf());
-				this.crash(10000);
 				randomSleep();
 			}
         }
+
+		protected void multicast(ChatMessage m, Map<Integer, ActorRef> participants) {
+			for (Map.Entry<Integer, ActorRef> entry: participants.entrySet()){
+				logger.info(String.format("[%d] - [-> %d] sending message %d", this.id, entry.getKey(), m.content));
+				entry.getValue().tell(m, getSelf());
+				//this.crash(10000);
+				this.randomSleep();
+			}
+		}
+
 		protected void randomSleep() {
-			long randomSleepTime = (long)(Math.random()*1000);
+			long randomSleepTime = (long)(Math.random()*3000);
 			try {
 				Thread.sleep(randomSleepTime);
 			} catch (InterruptedException e) {
@@ -166,6 +204,8 @@ public abstract class Actor extends AbstractActor {
 		protected void onHeartBeatMessage(HeartBeatMessage message) {
 			if (this.state == State.CRASHED) return;
 
+			logger.info(String.format("[%d] - [-> 0] heartbeat", this.id));
+
 			HeartBeatMessage hbm = new HeartBeatMessage(this.id);
 			getSender().tell(hbm, getSelf());
 		}
@@ -175,21 +215,6 @@ public abstract class Actor extends AbstractActor {
 			if (this.view == null) return; // Joining node - Ignores incoming unstable message
 			boolean added = this.msgBuffer.add(message);
 			if (added) this.deliverMessage(message);
-			run();
-		}
-
-		/**
-			Registers callbacks
-		 */
-		@Override
-		public Receive createReceive() {
-		return receiveBuilder()
-			.match(NewIDMessage.class, this::onNewIDMessage)
-			.match(ViewChangeMessage.class, this::onViewChangeMessage)
-			.match(ChatMessage.class, this::onChatMessage)
-			.match(FlushMessage.class, this::onFlushMessage)
-			.match(HeartBeatMessage.class, this::onHeartBeatMessage)
-			.build();
 		}
 
 

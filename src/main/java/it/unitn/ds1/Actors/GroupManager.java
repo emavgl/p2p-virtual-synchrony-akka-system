@@ -22,7 +22,6 @@ public class GroupManager extends Actor {
     public GroupManager(int id, String remotePath) {
         super(remotePath);
         this.id = id;             // is always 0
-
         this.init();
     }
 
@@ -33,29 +32,29 @@ public class GroupManager extends Actor {
         this.timeoutThreshold = 5;
         this.heartBeatThread  = new Thread(() -> {
             while (true){
-                try {
-                    // Check for a timeout, increment the counter
-                    for (Map.Entry<Integer, Integer> entry: this.heartBeatCounter.entrySet()){
-                        if (entry.getValue() == timeoutThreshold) this.onCrashDetected(entry.getKey());
-                        this.heartBeatCounter.put(entry.getKey(), entry.getValue()+1);
+                // Check for a timeout, increment the counter
+                for (Map.Entry<Integer, Integer> entry: this.heartBeatCounter.entrySet()){
+                    if (entry.getValue() == timeoutThreshold){
+                        this.onCrashDetected(entry.getKey());
                     }
 
-                    HeartBeatMessage hbm = new HeartBeatMessage(this.id);
-                    multicast(hbm, this.view.getMembers().values());
-                    Thread.sleep(1000);
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
+                    if (entry.getKey() > 0) this.heartBeatCounter.put(entry.getKey(), entry.getValue()+1);
                 }
+
+                logger.info(String.format("[0] - [-> %s] heartbeat", this.view.getMembers().keySet().toString()));
+
+                HeartBeatMessage hbm = new HeartBeatMessage(this.id);
+                multicast(hbm, this.view.getMembers().values());
             }
         });
     }
 
     @Override
     public void preStart() {
+        super.preStart();
         View firstView = new View(0).addNode(this.id, getSelf());
         this.installView(firstView);
         this.runHeartBeatLoop();
-        this.run();
     }
 
     private void runHeartBeatLoop(){
@@ -99,7 +98,7 @@ public class GroupManager extends Actor {
 
     private void newViewRequest(View v){
 
-        logger.info(String.format("[%d] - [-> %s] new view %d request", this.id,
+        logger.info(String.format("[0] - [-> %s] new view %d request",
                 v.getMembers().keySet().toString(),
                 v.getId()
         ));
@@ -108,20 +107,22 @@ public class GroupManager extends Actor {
     }
 
     private void onCrashDetected(int crashedNodeId){
+        this.state = State.PAUSE;
 
         logger.info(String.format("[%d] - node %d crashed within view %d", this.id,
                 crashedNodeId,
                 this.view.getId()
         ));
 
-        this.state = State.PAUSE;
         View newView = this.view.removeNodeById(crashedNodeId);
         this.newViewRequest(newView);
     }
 
     @Override
     protected void onHeartBeatMessage(HeartBeatMessage message){
-        logger.info(String.format("[%d] - [<- %d] heartbeat", this.id, message.senderId));
+        if (message.senderId > 0) {
+            logger.info(String.format("[%d] - [<- %d] heartbeat", this.id, message.senderId));
+        }
         this.heartBeatCounter.put(message.senderId, 0);
     }
 
