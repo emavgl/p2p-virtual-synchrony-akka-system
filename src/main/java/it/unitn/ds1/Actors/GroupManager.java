@@ -9,14 +9,15 @@ import scala.util.control.Exception;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Random;
+import java.util.Set;
 
 public class GroupManager extends Actor {
 
     private int memberIdCounter;
     private Map<Integer, Integer> heartBeatCounter;
     private int timeoutThreshold;
-
-    private Thread heartBeatThread;
+    private boolean heartBeatLoopStarted = false;
 
 
     public GroupManager(int id, String remotePath) {
@@ -30,23 +31,6 @@ public class GroupManager extends Actor {
         super.init();
         this.memberIdCounter = 1;
         this.timeoutThreshold = 5;
-        this.heartBeatThread  = new Thread(() -> {
-            while (true){
-                // Check for a timeout, increment the counter
-                for (Map.Entry<Integer, Integer> entry: this.heartBeatCounter.entrySet()){
-                    if (entry.getValue() == timeoutThreshold){
-                        this.onCrashDetected(entry.getKey());
-                    }
-
-                    if (entry.getKey() > 0) this.heartBeatCounter.put(entry.getKey(), entry.getValue()+1);
-                }
-
-                logger.info(String.format("[0] - [-> %s] heartbeat", this.view.getMembers().keySet().toString()));
-
-                HeartBeatMessage hbm = new HeartBeatMessage(this.id);
-                multicast(hbm, this.view.getMembers().values());
-            }
-        });
     }
 
     @Override
@@ -54,11 +38,6 @@ public class GroupManager extends Actor {
         super.preStart();
         View firstView = new View(0).addNode(this.id, getSelf());
         this.installView(firstView);
-        this.runHeartBeatLoop();
-    }
-
-    private void runHeartBeatLoop(){
-        this.heartBeatThread.start();
     }
 
     /**
@@ -75,29 +54,49 @@ public class GroupManager extends Actor {
     }
 
     private void initializeHeartBeatCounter(View v) {
+        // Initialize the heartBeat vector
+        // All the nodes will have an initial counter set to 0
         this.heartBeatCounter = new HashMap<>();
         for (Integer nodeId : v.getMembers().keySet()){
             this.heartBeatCounter.put(nodeId, 0);
         }
+
+        if (!this.heartBeatLoopStarted){
+            // Initialize the HeartBeat loop
+            // Simulating the reception of a new HeatBeatMessage
+            this.onHeartBeatMessage(new HeartBeatMessage(this.id));
+            this.heartBeatLoopStarted = true;
+        }
     }
 
+    /**
+     * Callback: new RequestJoinMessage received
+     * Set state to pause; send a new ID to the new node and start a new view request
+     * @param message: RequestJoinMessage
+     */
     private void onRequestJoinMessage(RequestJoinMessage message) {
+        // Set the state to pause
         this.state = State.PAUSE;
 
         logger.info(String.format("[%d] - [<- %d] join request at view %d", this.id, message.senderId,
                 this.view.getId()));
 
+        // Send a new ID
         ActorRef sender = getSender();
         int newId = memberIdCounter;
         logger.info(String.format("[%d] - [-> %d] new ID %d", this.id, message.senderId, newId));
         sender.tell(new NewIDMessage(this.id, memberIdCounter++), getSelf());
 
+        // Start a new View request
         View newView = this.view.addNode(newId, sender);
         this.newViewRequest(newView);
     }
 
+    /**
+     * Send a ViewChangeMessage in multicast
+     * @param v: View -- The new view to be proposed
+     */
     private void newViewRequest(View v){
-
         logger.info(String.format("[0] - [-> %s] new view %d request",
                 v.getMembers().keySet().toString(),
                 v.getId()
@@ -106,6 +105,11 @@ public class GroupManager extends Actor {
         multicast(new ViewChangeMessage(this.id, v), v.getMembers().values());
     }
 
+    /**
+     * Callback: on crashDetected message received
+     * Create a new view without node crashNodeId
+     * @param crashedNodeId: int
+     */
     private void onCrashDetected(int crashedNodeId){
         this.state = State.PAUSE;
 
@@ -118,12 +122,39 @@ public class GroupManager extends Actor {
         this.newViewRequest(newView);
     }
 
+    /**
+     * Callback: new HeartBeatMessage received
+     * This function is used to reschedule multicast of heatbeatmessage
+     * and to detect, using a counter, whether the node is crashed
+     * @param message: HeartBeatMessage
+     */
     @Override
     protected void onHeartBeatMessage(HeartBeatMessage message){
         if (message.senderId > 0) {
-            logger.info(String.format("[%d] - [<- %d] heartbeat", this.id, message.senderId));
+
+            // Received a message from another member
+            // Reset counter for message.senderId
+            this.heartBeatCounter.put(message.senderId, 0);
+            logger.info(String.format("[%d <- %d] heartbeat", this.id, message.senderId));
+
+        } else {
+
+            // Received a message from myself
+            // Check for a timeout and increment the counter
+            Set<Map.Entry<Integer, Integer>> entries = this.heartBeatCounter.entrySet();
+            for (Map.Entry<Integer, Integer> entry: entries){
+                if (entry.getValue() == timeoutThreshold){
+                    int toRemoveId = entry.getKey();
+                    this.onCrashDetected(toRemoveId);
+                }
+                if (entry.getKey() > 0) this.heartBeatCounter.put(entry.getKey(), entry.getValue()+1);
+            }
+
+            // Schedule a new HeartBeat Multicast to be sent after 1000 seconds
+            logger.info(String.format("[0 -> %s] heartbeat", this.view.getMembers().keySet().toString()));
+            this.scheduleMessageMulticast(new HeartBeatMessage(this.id), this.view.getMembers().values(), 2000);
         }
-        this.heartBeatCounter.put(message.senderId, 0);
+
     }
 
     /**
@@ -137,6 +168,8 @@ public class GroupManager extends Actor {
                 .match(ChatMessage.class, this::onChatMessage)
                 .match(FlushMessage.class, this::onFlushMessage)
                 .match(HeartBeatMessage.class, this::onHeartBeatMessage)
+                .match(SendNewChatMessage.class, this::onSendNewChatMessage)
+                .match(SendNewFlushMessage.class, this::onSendNewFlushMessage)
                 .build();
     }
 }

@@ -23,7 +23,7 @@ public class GroupMember extends Actor {
     public void preStart() {
         super.preStart();
         logger.info(String.format("[%d] - %s", this.id, "group member started"));
-        logger.info(String.format("[%d] - [-> 0] join request ", this.id));
+        logger.info(String.format("[%d -> 0] join request ", this.id));
         getContext().actorSelection(groupManagerHostPath).tell(new RequestJoinMessage(this.id), getSelf());
         this.keyListenerThread.start();
     }
@@ -32,16 +32,10 @@ public class GroupMember extends Actor {
      * Status Helper Functions
      * */
     @Override
-    protected void crash(long recoveryTime) {
+    protected void crash(int recoveryTime) {
         this.state = State.CRASHED;
         logger.info(String.format("[%d] - CRASH!!!", this.id));
-
-        getContext().system().scheduler().scheduleOnce(
-                Duration.create(recoveryTime, TimeUnit.MILLISECONDS),
-                getSelf(),
-                new RecoveryMessage(this.id), // message sent to myself
-                getContext().system().dispatcher(), getSelf()
-        );
+        this.scheduleMessage(new RecoveryMessage(this.id), getSelf(), recoveryTime);
     }
 
     protected void onRecoveryMessage(RecoveryMessage message){
@@ -69,6 +63,7 @@ public class GroupMember extends Actor {
                 .match(FlushMessage.class, this::onFlushMessage)
                 .match(HeartBeatMessage.class, this::onHeartBeatMessage)
                 .match(RecoveryMessage.class, this::onRecoveryMessage)
+                .match(SendNewChatMessage.class, this::onSendNewChatMessage)
                 .build();
     }
 }
