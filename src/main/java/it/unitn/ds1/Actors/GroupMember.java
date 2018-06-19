@@ -35,7 +35,7 @@ public class GroupMember extends Actor {
     protected void crash(int recoveryTime) {
         this.state = State.CRASHED;
         logger.info(String.format("[%d] - CRASH!!!", this.id));
-        this.scheduleMessage(new RecoveryMessage(this.id), getSelf(), recoveryTime);
+        this.senderHelperNoLog.scheduleMessageReliable(new RecoveryMessage(this.id), getSelf(), this.id, "RecoveryMessage", recoveryTime);
     }
 
     protected void onRecoveryMessage(RecoveryMessage message){

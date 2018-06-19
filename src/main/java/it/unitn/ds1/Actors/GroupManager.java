@@ -97,12 +97,12 @@ public class GroupManager extends Actor {
      * @param v: View -- The new view to be proposed
      */
     private void newViewRequest(View v){
-        logger.info(String.format("[0] - [-> %s] new view %d request",
+        logger.info(String.format("[0] - [-> %s] schedule new view %d request",
                 v.getMembers().keySet().toString(),
                 v.getId()
         ));
 
-        multicast(new ViewChangeMessage(this.id, v), v.getMembers().values());
+        this.senderHelperLog.scheduleMulticast(new ViewChangeMessage(this.id, v), v.getMembers(), "ViewChangeMessage");
     }
 
     /**
@@ -151,8 +151,8 @@ public class GroupManager extends Actor {
             }
 
             // Schedule a new HeartBeat Multicast to be sent after 1000 seconds
-            logger.info(String.format("[0 -> %s] heartbeat", this.view.getMembers().keySet().toString()));
-            this.scheduleMessageMulticast(new HeartBeatMessage(this.id), this.view.getMembers().values(), 2000);
+            // logger.info(String.format("[0 -> %s] scheduling heartbeat", this.view.getMembers().keySet().toString()));
+            this.senderHelperLog.scheduleMulticast(new HeartBeatMessage(this.id), this.view.getMembers(), "HeartBeatMessage");
         }
 
     }
@@ -169,7 +169,6 @@ public class GroupManager extends Actor {
                 .match(FlushMessage.class, this::onFlushMessage)
                 .match(HeartBeatMessage.class, this::onHeartBeatMessage)
                 .match(SendNewChatMessage.class, this::onSendNewChatMessage)
-                .match(SendNewFlushMessage.class, this::onSendNewFlushMessage)
                 .build();
     }
 }
