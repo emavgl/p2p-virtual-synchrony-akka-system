@@ -4,5 +4,6 @@ public enum State {
     INIT,
     NORMAL,
     PAUSE,
-    CRASHED
+    CRASHED,
+    BUSY
 }

@@ -35,7 +35,7 @@ public class GroupMember extends Actor {
     protected void crash(int recoveryTime) {
         this.state = State.CRASHED;
         logger.info(String.format("[%d] - CRASH!!!", this.id));
-        this.senderHelperNoLog.scheduleMessageReliable(new RecoveryMessage(this.id), getSelf(), this.id, "RecoveryMessage", recoveryTime);
+        this.senderHelperLog.scheduleControlMessage(new RecoveryMessage(this.id), 60000);
     }
 
     protected void onRecoveryMessage(RecoveryMessage message){
@@ -49,7 +49,6 @@ public class GroupMember extends Actor {
     static public Props props(String remotePath) {
         return Props.create(GroupMember.class, () -> new GroupMember(remotePath));
     }
-
 
     /**
      Registers callbacks

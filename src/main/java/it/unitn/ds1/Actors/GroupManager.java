@@ -40,6 +40,12 @@ public class GroupManager extends Actor {
         this.installView(firstView);
     }
 
+    @Override
+    void crash(int time) {
+        // Nothing
+        // Group manager cannot crash
+    }
+
     /**
      Akka - Build from constructor
      */
@@ -102,7 +108,7 @@ public class GroupManager extends Actor {
                 v.getId()
         ));
 
-        this.senderHelperLog.scheduleMulticast(new ViewChangeMessage(this.id, v), v.getMembers(), "ViewChangeMessage");
+        this.senderHelperLog.enqMulticast(new ViewChangeMessage(this.id, v), v.getMembers(), -1, true);
     }
 
     /**
@@ -131,11 +137,10 @@ public class GroupManager extends Actor {
     @Override
     protected void onHeartBeatMessage(HeartBeatMessage message){
         if (message.senderId > 0) {
-
             // Received a message from another member
             // Reset counter for message.senderId
             this.heartBeatCounter.put(message.senderId, 0);
-            logger.info(String.format("[%d <- %d] heartbeat", this.id, message.senderId));
+            logger.info(String.format("[%d <- %d] Heartbeat", this.id, message.senderId));
 
         } else {
 
@@ -152,9 +157,8 @@ public class GroupManager extends Actor {
 
             // Schedule a new HeartBeat Multicast to be sent after 1000 seconds
             // logger.info(String.format("[0 -> %s] scheduling heartbeat", this.view.getMembers().keySet().toString()));
-            this.senderHelperLog.scheduleMulticast(new HeartBeatMessage(this.id), this.view.getMembers(), "HeartBeatMessage");
+            this.senderHelperLog.enqMulticast(new HeartBeatMessage(this.id), this.view.getMembers(), 3000, false);
         }
-
     }
 
     /**

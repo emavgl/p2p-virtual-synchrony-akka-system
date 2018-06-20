@@ -2,6 +2,7 @@ package it.unitn.ds1.Actors;
 import java.io.Serializable;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 
 import akka.actor.ActorRef;
 import akka.actor.AbstractActor;
@@ -9,6 +10,7 @@ import akka.actor.Props;
 
 import it.unitn.ds1.Helpers.SenderHelper;
 import it.unitn.ds1.Messages.*;
+import it.unitn.ds1.Models.MessageQueue;
 import it.unitn.ds1.Models.State;
 import it.unitn.ds1.Models.View;
 import org.apache.log4j.Logger;
@@ -33,11 +35,11 @@ public abstract class Actor extends AbstractActor {
 		protected HashMap<Integer, Set<Integer>> flushes;
 		protected Thread keyListenerThread;
 		protected boolean chatMessageLoopStarted;
-		protected final int Td = 10000;
 		protected SenderHelper senderHelperLog;
-		protected SenderHelper senderHelperNoLog;
 
-		/* -- Actor constructor --------------------------------------------------- */
+        abstract void crash(int time);
+
+    /* -- Actor constructor --------------------------------------------------- */
 		public Actor(String groupManagerHostPath) {
 			this.groupManagerHostPath = groupManagerHostPath;
 			this.init();
@@ -49,8 +51,7 @@ public abstract class Actor extends AbstractActor {
 			this.msgBuffer = new HashSet<>();
 			this.flushes = new HashMap<> ();
 			this.chatMessageLoopStarted = false;
-			this.senderHelperLog = new SenderHelper(this.Td, this, true);
-			this.senderHelperNoLog = new SenderHelper(2001, this, false);
+			this.senderHelperLog = new SenderHelper(this, true);
 			this.keyListenerThread  = new Thread(() -> {
 				while (true){
 					Scanner keyboard = new Scanner(System.in);
@@ -69,45 +70,30 @@ public abstract class Actor extends AbstractActor {
 					keyboard.close();
 				}
 			});
-
 		}
 
-		@Override
-		public void preStart() {
-		}
+        @Override
+        public void preStart() {
+            try {
+                super.preStart();
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
 
-		protected void crash(int time) {
-
-		}
-
-		/*
-		* RUN
-		* Send NewChatMessage to myself
-		* */
-		protected void run(){
-			if (!chatMessageLoopStarted){
-				this.senderHelperNoLog.scheduleMessage(new SendNewChatMessage(this.id), getSelf(), 0,
-						"SendNewChatMessage");
-				this.chatMessageLoopStarted = true;
-			}
-		}
-
+    /**
+         * Callback: on receiving of a new SendNewChatMessage
+         * It create and enque a new ChatMessage
+         * @param message
+         */
 		protected void onSendNewChatMessage(SendNewChatMessage message){
-			// Create and send a new ChatMessage in multicast when the state is NORMAL
-			if (this.state == State.NORMAL && this.view.getMembers().size() > 1){
-				ChatMessage m = new ChatMessage(this.id, this.contentCounter++);
-				logger.info(String.format("[%d -> %s] scheduling chatmsg %d within %d",
-						this.id, this.view.getMembers().keySet().toString(), m.content, this.view.getId()));
-				this.senderHelperLog.scheduleMulticast(m, this.view.getMembers());
-			}
+            if (this.state == State.CRASHED) return;
 
-			// Schedule new SendNewChatMessage
-			// Do it in any case, even if the node crashed or is in pause
-			// This methods is here only to simulate a loop
-			int timeForTheNextMessage = new Random().nextInt(this.Td - 2000) + 2000;
-			this.senderHelperNoLog.scheduleMessage(new SendNewChatMessage(this.id), getSelf(), 0,
-					"SendNewChatMessage", timeForTheNextMessage);
-		}
+            if (state == State.NORMAL && this.view.getMembers().size() > 1){
+		        senderHelperLog.enqMulticast(new ChatMessage(this.id, this.contentCounter++), this.view.getMembers(), -1, true);
+            }
+            senderHelperLog.scheduleControlMessage(message, 15000);
+        }
 
 		/**
 		 * Callback: on new ChatMessage Received
@@ -119,7 +105,7 @@ public abstract class Actor extends AbstractActor {
 
 			if (this.view == null) return; // Joining node - Ignores incoming unstable message
 			boolean added = this.msgBuffer.add(message);
-			if (added) this.deliverMessage(message);
+			if (added) this.deliverMessage(message); // do not deliver the message twice
 		}
 
 		protected void deliverMessage(ChatMessage message){
@@ -135,23 +121,31 @@ public abstract class Actor extends AbstractActor {
 					this.id, this.view.getMembers().keySet().toString(), this.view.getId()));
 
 			for (ChatMessage m : this.msgBuffer){
-				this.senderHelperLog.scheduleMulticast(m, this.view.getMembers());
+				this.senderHelperLog.enqMulticast(m, this.view.getMembers(),  -1, true);
 			}
 		}
 
-
 		protected void installView(View v){
-			this.state = State.PAUSE;
-			this.view = new View(v.getId(), v.getMembers());
 			this.proposedView = null;
 			this.flushes.clear();
-			logger.info(String.format("[%d] - install view %d %s", this.id, this.view.getId(),
-					this.view.getMembers().keySet().toString()));
-			this.state = State.NORMAL;
-			this.run();
+
+			logger.info(String.format("[%d] - install view %d %s", this.id, v.getId(),
+					v.getMembers().keySet().toString()));
+
+            this.view = new View(v.getId(), v.getMembers());
+
+            this.state = State.NORMAL;
+            this.startChatMessageLoop();
 		}
 
-		/**
+        private void startChatMessageLoop() {
+		    if (!this.chatMessageLoopStarted){
+                senderHelperLog.scheduleControlMessage(new SendNewChatMessage(this.id), 2000);
+		        this.chatMessageLoopStarted = true;
+            }
+        }
+
+        /**
 		 * Callback: on receiving a new ViewChangeMessage
 		 * Set proposedView, send unstable messages and flushes
 		 * @param message: ViewChangeMessage
@@ -161,6 +155,7 @@ public abstract class Actor extends AbstractActor {
 
 			logger.info(String.format("[%d <- 0] Received a request for new view %d", this.id,
 					message.view.getId()));
+
 			this.state = State.PAUSE;
 			this.proposedView = message.view;
 
@@ -185,11 +180,8 @@ public abstract class Actor extends AbstractActor {
 			}
 
 			// Send in multicast the flush message
-			logger.info(String.format("[%d -> %s] schedule flush for view %d",
-					this.id, this.proposedView.getMembers().keySet().toString(), this.proposedView.getId()));
-
-			FlushMessage fm = new FlushMessage(this.id, this.proposedView.getId());
-			this.senderHelperLog.scheduleMulticast(fm, this.proposedView.getMembers(), "Flush");
+            FlushMessage fm = new FlushMessage(this.id, this.proposedView.getId());
+            this.senderHelperLog.enqMulticast(fm, this.proposedView.getMembers(), -1, true);
 		}
 
 		/**
@@ -220,6 +212,7 @@ public abstract class Actor extends AbstractActor {
 		* */
 		protected void onNewIDMessage(NewIDMessage message) {
 			if (this.state == State.CRASHED) return;
+
 			logger.info(String.format("[%d] - [<- %d] new id %d", this.id, message.senderId, message.id));
 			this.id = message.id;
 		}
@@ -227,15 +220,9 @@ public abstract class Actor extends AbstractActor {
 
 		protected void onHeartBeatMessage(HeartBeatMessage message) {
 			if (this.state == State.CRASHED) return;
-
-			logger.info(String.format("[%d -> 0] heartbeat", this.id));
-
-			HeartBeatMessage hbm = new HeartBeatMessage(this.id);
-			this.senderHelperLog.scheduleMessage(hbm, getSender(), message.senderId, "HeartBeatMessage");
-
-			// Don't ask, getSender doesn't work
-
-			//this.view.getMembers().get(0).tell(hbm, getSelf());
-			//this.senderHelperLog.unicast(hbm, getSender(), 0, "HeartBeatMessage");
+            HeartBeatMessage hbm = new HeartBeatMessage(this.id);
+            Map<Integer, ActorRef> receiver = new HashMap<>();
+            receiver.put(0, getSender());
+            this.senderHelperLog.enqMulticast(hbm, receiver, 3000, true);
 		}
 }

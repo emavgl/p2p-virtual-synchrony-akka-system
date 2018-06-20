@@ -5,13 +5,15 @@ import akka.actor.ActorSystem;
 import it.unitn.ds1.Actors.Actor;
 import it.unitn.ds1.Messages.ChatMessage;
 import it.unitn.ds1.Messages.Message;
+import it.unitn.ds1.Models.MessageQueue;
+import it.unitn.ds1.Models.MessageRequest;
 import it.unitn.ds1.Models.State;
+import org.agrona.collections.IntHashSet;
 import org.apache.log4j.Logger;
 
 import java.io.Serializable;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Random;
+import java.util.*;
+import java.util.concurrent.locks.ReentrantLock;
 
 public class SenderHelper {
 
@@ -22,17 +24,63 @@ public class SenderHelper {
     private int td;
     private Actor actor;
     private boolean shouldLog;
+    protected MessageQueue messageQueue;
+    protected State state;
 
-    public SenderHelper(int td, Actor actor, boolean shouldLog) {
-        this.td = td;
+    public SenderHelper(Actor actor, boolean shouldLog) {
         this.actor = actor;
         this.system = this.actor.getContext().getSystem();
         this.shouldLog = shouldLog;
+        this.messageQueue = new MessageQueue();
+        this.state = State.NORMAL;
     }
 
-    public void scheduleMulticast(Message m, Map<Integer, ActorRef> receivers, String messageType) {
-        for (Map.Entry<Integer, ActorRef> entry : receivers.entrySet()) {
-            int timeForTheNextMessage = new Random().nextInt(this.td - 2000) + 2000;
+    public void enqMulticast(Message m, Map<Integer, ActorRef> receivers, int milliseconds, boolean shoudLog) {
+        this.messageQueue.add(new MessageRequest(m, receivers, milliseconds, shoudLog));
+        if (this.state == State.NORMAL) this.sendNextMessage();
+    }
+
+    public void enqMulticast(Message m, Map<Integer, ActorRef> receivers) {
+        this.enqMulticast(m, receivers, -1, true);
+    }
+
+    private void sendNextMessage(){
+        if (this.messageQueue.isEmpty()){
+            state = State.NORMAL;
+        } else {
+            // If it is busy, will schedule the next message by itself
+            state = State.BUSY;
+            scheduleMessages(this.messageQueue.next());
+        }
+    }
+
+    private void scheduleMessages(MessageRequest mr){
+        Message m = mr.m;
+        Set<Map.Entry<Integer, ActorRef>> entries = mr.receivers.entrySet();
+        Set<Integer> sent = new HashSet<>();
+        String messageType = m.getClass().getSimpleName();;
+        String contentStr = "";
+        String viewIdStr = "";
+
+        if (messageType.toLowerCase().contains("chat")) {
+            int content = ((ChatMessage)(mr.m)).content;
+            contentStr = String.valueOf(content);
+        }
+
+        if (actor.view != null){
+            viewIdStr = String.valueOf(actor.view.getId());
+        }
+
+        final String messageContent = contentStr;
+        final String viewId = viewIdStr;
+
+        if (mr.shoudLog) {
+            logger.info(String.format("[%d -> %s] scheduling %s (c: %s) within %s",
+                    m.senderId, mr.receivers.keySet().toString(), messageType, messageContent, viewId));
+        }
+
+        for (Map.Entry<Integer, ActorRef> entry : entries) {
+            int timeForTheNextMessage = new Random().nextInt(mr.milliseconds);
             this.system.scheduler().scheduleOnce(java.time.Duration.ofMillis(timeForTheNextMessage),
                     new Runnable() {
                         @Override
@@ -40,153 +88,32 @@ public class SenderHelper {
 
                             if (actor.state == State.CRASHED) return;
 
-                            if (shouldLog){
-                                logger.info(String.format("[%d -> %d] %s message", m.senderId,
-                                        entry.getKey(), messageType));
+                            if (shouldLog && mr.shoudLog){
+                                logger.info(String.format("[%d -> %s] send %s (c: %s) within %s",
+                                        m.senderId, entry.getKey(), messageType,
+                                        messageContent, viewId));
                             }
 
                             entry.getValue().tell(m, actor.getSelf());
+                            sent.add(entry.getKey());
+
+                            if (sent.size() == entries.size()){
+                                // Sent all the messages
+                                // Do something
+                                sendNextMessage();
+                            }
                         }
                     }, this.system.dispatcher());
         }
     }
 
-    public void scheduleMulticast(Message m, Map<Integer, ActorRef> receivers, String messageType, int milliseconds) {
-        for (Map.Entry<Integer, ActorRef> entry : receivers.entrySet()) {
-            this.system.scheduler().scheduleOnce(java.time.Duration.ofMillis(milliseconds),
-                    new Runnable() {
-                        @Override
-                        public void run() {
-
-                            if (actor.state == State.CRASHED) return;
-
-                            if (shouldLog){
-                                logger.info(String.format("[%d -> %d] %s message", m.senderId,
-                                        entry.getKey(), messageType));
-                            }
-                            entry.getValue().tell(m, actor.getSelf());
-                        }
-                    }, this.system.dispatcher());
-        }
-    }
-
-    public void scheduleMulticast(ChatMessage m, Map<Integer, ActorRef> receivers) {
-        for (Map.Entry<Integer, ActorRef> entry : receivers.entrySet()) {
-            int timeForTheNextMessage = new Random().nextInt(this.td - 2000) + 2000;
-            this.system.scheduler().scheduleOnce(java.time.Duration.ofMillis(timeForTheNextMessage),
-                    new Runnable() {
-                        @Override
-                        public void run() {
-
-                            if (actor.state == State.CRASHED) return;
-
-                            if (shouldLog){
-                                logger.info(String.format("[%d -> %s] send chatmsg %d within %d",
-                                        m.senderId, receivers.keySet().toString(),
-                                        m.content, actor.view.getId()));
-                            }
-                            entry.getValue().tell(m, actor.getSelf());
-                        }
-                    }, this.system.dispatcher());
-        }
-    }
-
-
-    public void scheduleMulticast(ChatMessage m, Map<Integer, ActorRef> receivers, int milliseconds) {
-        int timeForTheNextMessage = milliseconds;
-        for (Map.Entry<Integer, ActorRef> entry : receivers.entrySet()) {
-            this.system.scheduler().scheduleOnce(java.time.Duration.ofMillis(timeForTheNextMessage),
-                    new Runnable() {
-                        @Override
-                        public void run() {
-
-                            if (actor.state == State.CRASHED) return;
-
-                            if (shouldLog){
-                                logger.info(String.format("[%d -> %s] send chatmsg %d within %d",
-                                        m.senderId, receivers.keySet().toString(),
-                                        m.content, actor.view.getId()));
-                            }
-                            entry.getValue().tell(m, actor.getSelf());
-                        }
-                    }, this.system.dispatcher());
-        }
-    }
-
-    public void scheduleMessage(Message m, ActorRef receiver, int receiverId, String messageType) {
-        int timeForTheNextMessage = new Random().nextInt(this.td - 2000) + 2000;
-        this.system.scheduler().scheduleOnce(java.time.Duration.ofMillis(timeForTheNextMessage),
-                new Runnable() {
-                    @Override
-                    public void run() {
-                        if (actor.state == State.CRASHED) return;
-                        if (shouldLog){
-                            logger.info(String.format("[%d -> %d] %s message", m.senderId,
-                                    receiverId, messageType));
-                        }
-                        receiver.tell(m, actor.getSelf());
-                    }
-                }, this.system.dispatcher());
-    }
-
-    public void scheduleMessageReliable(Message m, ActorRef receiver, int receiverId, String messageType, int time) {
-        this.system.scheduler().scheduleOnce(java.time.Duration.ofMillis(time),
-                new Runnable() {
-                    @Override
-                    public void run() {
-                        if (shouldLog){
-                            logger.info(String.format("[%d -> %d] %s message", m.senderId,
-                                    receiverId, messageType));
-                        }
-                        receiver.tell(m, actor.getSelf());
-                    }
-                }, this.system.dispatcher());
-    }
-
-    public void scheduleMessage(Message m, ActorRef receiver, int receiverId, String messageType, int milliseconds) {
+    public void scheduleControlMessage(Message m, int milliseconds){
         this.system.scheduler().scheduleOnce(java.time.Duration.ofMillis(milliseconds),
                 new Runnable() {
                     @Override
                     public void run() {
-                        if (actor.state == State.CRASHED) return;
-                        if (shouldLog){
-                            logger.info(String.format("[%d -> %d] %s message", m.senderId,
-                                    receiverId, messageType));
-                        }
-                        receiver.tell(m, actor.getSelf());
+                        actor.getSelf().tell(m, actor.getSelf());
                     }
                 }, this.system.dispatcher());
-    }
-
-    public void multicast(Message m, Map<Integer, ActorRef> participants, String messageType) {
-        for (Map.Entry<Integer, ActorRef> entry: participants.entrySet()){
-            if (shouldLog){
-                logger.info(String.format("[%d -> %d] %s message", m.senderId, entry.getKey(), messageType));
-            }
-            entry.getValue().tell(m, this.actor.getSelf());
-        }
-    }
-
-    public void multicast(ChatMessage m, Map<Integer, ActorRef> participants) {
-        for (Map.Entry<Integer, ActorRef> entry: participants.entrySet()){
-            if (shouldLog){
-                logger.info(String.format("[%d -> %d] chatmsg %d", m.senderId, entry.getKey(), m.content));
-            }
-            entry.getValue().tell(m, this.actor.getSelf());
-        }
-    }
-
-    public void unicast(Message m, ActorRef receiver, int receiverId, String messageType){
-        if (shouldLog){
-            logger.info(String.format("[%d -> %d] %s message", m.senderId, receiverId, messageType));
-        }
-        receiver.tell(m, this.actor.getSelf());
-    }
-
-    public void unicast(ChatMessage m, ActorRef receiver, int receiverId){
-        if (shouldLog){
-            logger.info(String.format("[%d -> %d] chatmsg %d", m.senderId, receiverId, m.content));
-        }
-        receiver.tell(m, this.actor.getSelf());
     }
 }
