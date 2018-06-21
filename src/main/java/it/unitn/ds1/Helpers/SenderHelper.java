@@ -49,8 +49,10 @@ public class SenderHelper {
             state = State.NORMAL;
         } else {
             // If it is busy, will schedule the next message by itself
-            state = State.BUSY;
-            scheduleMessages(this.messageQueue.next());
+            if (state != State.BUSY){
+                state = State.BUSY;
+                scheduleMessages(this.messageQueue.next());
+            }
         }
     }
 
@@ -100,6 +102,7 @@ public class SenderHelper {
                             if (sent.size() == entries.size()){
                                 // Sent all the messages
                                 // Do something
+                                state = State.NORMAL;
                                 sendNextMessage();
                             }
                         }
