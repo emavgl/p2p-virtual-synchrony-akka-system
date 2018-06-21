@@ -70,7 +70,9 @@ public class SenderHelper {
         }
 
         if (actor.view != null){
-            viewIdStr = String.valueOf(actor.view.getId());
+            final int currentViewId = actor.view.getId();
+            mr.m.viewId = currentViewId;
+            viewIdStr = String.valueOf(currentViewId);
         }
 
         final String messageContent = contentStr;

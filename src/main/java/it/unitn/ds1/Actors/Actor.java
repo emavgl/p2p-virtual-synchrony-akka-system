@@ -32,6 +32,7 @@ public abstract class Actor extends AbstractActor {
 		protected int contentCounter = 0;
 		public State state;
 		protected Set<ChatMessage> msgBuffer;
+		protected Set<ChatMessage> msgDelivered;
 		protected HashMap<Integer, Set<Integer>> flushes;
 		protected Thread keyListenerThread;
 		protected boolean chatMessageLoopStarted;
@@ -49,6 +50,7 @@ public abstract class Actor extends AbstractActor {
 			this.view = null;
 			this.state = State.INIT;
 			this.msgBuffer = new HashSet<>();
+			this.msgDelivered = new HashSet<>();
 			this.flushes = new HashMap<> ();
 			this.chatMessageLoopStarted = false;
 			this.senderHelperLog = new SenderHelper(this, true);
@@ -102,15 +104,44 @@ public abstract class Actor extends AbstractActor {
 		 */
 		protected void onChatMessage(ChatMessage message){
 			if (this.state == State.CRASHED) return;
-
 			if (this.view == null) return; // Joining node - Ignores incoming unstable message
-			boolean added = this.msgBuffer.add(message);
-			if (added) this.deliverMessage(message); // do not deliver the message twice
+			this.canDeliverMessage(message); // do not deliver the message twice
 		}
 
-		protected void deliverMessage(ChatMessage message){
-			logger.info(String.format("[%d <- %d] deliver chatmsg %d within %d", this.id,
-					message.senderId, message.content, this.view.getId()));
+		/**
+		 * Add message to buffer, deliver all the possible messages and remove stable messages from sender
+		 * Useful only to check if it is possible to deliver the received chatMessage
+		 * Not useful for other messages, for example, flushes, not possibile to receive
+		 * a flush message and be a view ahead.
+		 * @param message
+		 */
+		protected void canDeliverMessage(ChatMessage message){
+			// Should always enter inside the if
+			// ViewID is set by the senderHelper
+			if (message.viewId != null){
+				if (message.viewId > this.view.getId()) {
+					// Add but not deliver
+					this.msgBuffer.add(message);
+					return;
+				}
+				else if (message.viewId < this.view.getId()) return; // Impossible, last msg should be a flush, if so, ignore
+			}
+
+			// If here, the viewId matches
+			// Add to the msgBuffer
+			this.msgBuffer.add(message);
+
+			// Check and deliver previous messages
+			for (ChatMessage m: this.msgBuffer) {
+				if (this.view.getId() == m.viewId && !this.msgDelivered.contains(m)) {
+					this.msgDelivered.add(m);
+					logger.info(String.format("[%d <- %d] deliver chatmsg %d within %d", this.id,
+							m.senderId, m.content, this.view.getId()));
+				}
+			}
+
+			// Remove all stable messages of senderId from buffer
+			this.msgBuffer.removeIf(m -> m.senderId == message.senderId && m.content < message.content);
 		}
 
 		/*
@@ -120,7 +151,7 @@ public abstract class Actor extends AbstractActor {
 			logger.info(String.format("[%d -> %s] unstable messages within view %d",
 					this.id, this.view.getMembers().keySet().toString(), this.view.getId()));
 
-			for (ChatMessage m : this.msgBuffer){
+			for (Message m : this.msgBuffer){
 				this.senderHelperLog.enqMulticast(m, this.view.getMembers(),  -1, true);
 			}
 		}
