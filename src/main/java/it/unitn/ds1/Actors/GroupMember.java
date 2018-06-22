@@ -39,8 +39,10 @@ public class GroupMember extends Actor {
     }
 
     protected void onRecoveryMessage(RecoveryMessage message){
-        this.init();
-        this.preStart();
+        if (state == State.CRASHED) {
+            this.init();
+            this.preStart();
+        }
     }
 
     /**

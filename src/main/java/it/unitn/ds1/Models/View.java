@@ -1,6 +1,7 @@
 package it.unitn.ds1.Models;
 
 import akka.actor.ActorRef;
+import akka.actor.dsl.Creators;
 
 import java.io.Serializable;
 import java.util.Collection;
@@ -36,8 +37,13 @@ public class View implements Serializable {
         return new View(this.getId()+1, newMembers);
     }
 
+    private void removeOldActorRef(Map<Integer, ActorRef> members, ActorRef ref){
+        members.values().removeIf(v -> v.equals(ref));
+    }
+
     public View addNode(int id, ActorRef sender){
         Map<Integer, ActorRef> newMembers = new HashMap<>(this.getMembers());
+        this.removeOldActorRef(newMembers, sender);
         newMembers.put(id, sender);
         return new View(this.getId()+1, newMembers);
     }

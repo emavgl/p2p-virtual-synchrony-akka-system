@@ -94,7 +94,13 @@ public class GroupManager extends Actor {
         sender.tell(new NewIDMessage(this.id, memberIdCounter++), getSelf());
 
         // Start a new View request
-        View newView = this.view.addNode(newId, sender);
+        View newView;
+        if (this.proposedView != null){
+            newView = this.proposedView.addNode(newId, sender);
+        } else {
+            newView = this.view.addNode(newId, sender);
+        }
+
         this.newViewRequest(newView);
     }
 
@@ -108,6 +114,7 @@ public class GroupManager extends Actor {
                 v.getId()
         ));
 
+        this.proposedView = v;
         this.senderHelperLog.enqMulticast(new ViewChangeMessage(this.id, v), v.getMembers(), -1, true);
     }
 
@@ -124,7 +131,12 @@ public class GroupManager extends Actor {
                 this.view.getId()
         ));
 
-        View newView = this.view.removeNodeById(crashedNodeId);
+        View newView;
+        if (this.proposedView != null){
+            newView = this.proposedView.removeNodeById(crashedNodeId);
+        } else {
+            newView = this.view.removeNodeById(crashedNodeId);
+        }
         this.newViewRequest(newView);
     }
 

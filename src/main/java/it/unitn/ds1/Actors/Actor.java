@@ -64,8 +64,10 @@ public abstract class Actor extends AbstractActor {
 							if ("c".equals(input)) {
 								System.out.println("Key pressed, crash mode on");
 								this.crash(100000);
-							} else if ("x".equals(input)) {
+							} else if ("s".equals(input)) {
 								//Do something
+								System.out.println("Key pressed, start");
+								getSelf().tell(new RecoveryMessage(this.id), getSelf());
 							}
 						}
 					}
@@ -109,7 +111,7 @@ public abstract class Actor extends AbstractActor {
 		}
 
 		/**
-		 * Add message to buffer, deliver all the possible messages and remove stable messages from sender
+		 * Add message to buffer, deliver all the possible messages and remove stable messages from buffer
 		 * Useful only to check if it is possible to deliver the received chatMessage
 		 * Not useful for other messages, for example, flushes, not possibile to receive
 		 * a flush message and be a view ahead.
@@ -124,7 +126,11 @@ public abstract class Actor extends AbstractActor {
 					this.msgBuffer.add(message);
 					return;
 				}
-				else if (message.viewId < this.view.getId()) return; // Impossible, last msg should be a flush, if so, ignore
+				else if (message.viewId < this.view.getId()){
+					// Impossible, last msg should be a flush, if so, ignore
+					logger.error("Received a message from a previous view");
+					return;
+				}
 			}
 
 			// If here, the viewId matches

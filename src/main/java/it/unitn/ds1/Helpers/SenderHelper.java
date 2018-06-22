@@ -79,7 +79,7 @@ public class SenderHelper {
         final String viewId = viewIdStr;
 
         if (mr.shoudLog) {
-            logger.info(String.format("[%d -> %s] scheduling %s (c: %s) within %s",
+            logger.info(String.format("[%d -> %s] sent %s (c: %s) within %s",
                     m.senderId, mr.receivers.keySet().toString(), messageType, messageContent, viewId));
         }
 
@@ -92,11 +92,13 @@ public class SenderHelper {
 
                             if (actor.state == State.CRASHED) return;
 
+                            /*
                             if (shouldLog && mr.shoudLog){
                                 logger.info(String.format("[%d -> %s] send %s (c: %s) within %s",
                                         m.senderId, entry.getKey(), messageType,
                                         messageContent, viewId));
                             }
+                            */
 
                             entry.getValue().tell(m, actor.getSelf());
                             sent.add(entry.getKey());
