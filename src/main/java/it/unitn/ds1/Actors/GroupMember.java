@@ -3,20 +3,20 @@ package it.unitn.ds1.Actors;
 import akka.actor.Props;
 import it.unitn.ds1.Messages.*;
 import it.unitn.ds1.Models.State;
-import it.unitn.ds1.Models.View;
-import scala.concurrent.duration.Duration;
-
-import java.util.concurrent.TimeUnit;
 
 public class GroupMember extends Actor {
     public GroupMember(String remotePath) {
         super(remotePath);
     }
+    private long latestHeartBeatReceived;
+    private long maxMillisWithoutHeartBeat;
 
     @Override
     protected void init() {
         super.init();
         this.id = -(int)(Math.random() * 1000);
+        latestHeartBeatReceived = 0;
+        maxMillisWithoutHeartBeat = 30000;
     }
 
     @Override
@@ -35,7 +35,7 @@ public class GroupMember extends Actor {
     protected void crash(int recoveryTime) {
         this.state = State.CRASHED;
         logger.info(String.format("[%d] - CRASH!!!", this.id));
-        this.senderHelperLog.scheduleControlMessage(new RecoveryMessage(this.id), 60000);
+        this.senderHelper.scheduleControlMessage(new RecoveryMessage(this.id), recoveryTime);
     }
 
     protected void onRecoveryMessage(RecoveryMessage message){
@@ -43,6 +43,21 @@ public class GroupMember extends Actor {
             this.init();
             this.preStart();
         }
+    }
+
+    @Override
+    protected void onSendNewChatMessage(SendNewChatMessage message) {
+        super.onSendNewChatMessage(message);
+
+        // Add a control, Am I talking alone?
+        long timeElapsed = System.currentTimeMillis() - this.latestHeartBeatReceived;
+        if (timeElapsed > this.maxMillisWithoutHeartBeat ) crash(30000);
+    }
+
+    @Override
+    protected void onHeartBeatMessage(HeartBeatMessage message) {
+        super.onHeartBeatMessage(message);
+        this.latestHeartBeatReceived = System.currentTimeMillis();
     }
 
     /**

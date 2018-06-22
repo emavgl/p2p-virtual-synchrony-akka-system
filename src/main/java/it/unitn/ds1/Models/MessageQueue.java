@@ -1,5 +1,6 @@
 package it.unitn.ds1.Models;
 
+import it.unitn.ds1.Messages.ChatMessage;
 import it.unitn.ds1.Messages.Message;
 
 import java.util.LinkedList;
@@ -19,8 +20,12 @@ public class MessageQueue {
     public MessageRequest next(){
         return queue.poll();
     }
-
     public boolean isEmpty(){
         return queue.isEmpty();
     }
+    public void removeChatMessages() {
+        queue.removeIf(x -> x.m instanceof ChatMessage);
+    }
+
+    public int getSize() { return this.queue.size(); }
 }

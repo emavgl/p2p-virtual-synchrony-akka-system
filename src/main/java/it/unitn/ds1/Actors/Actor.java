@@ -1,20 +1,14 @@
 package it.unitn.ds1.Actors;
-import java.io.Serializable;
 import java.util.*;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.locks.ReentrantLock;
 
-import akka.actor.ActorRef;
 import akka.actor.AbstractActor;
-import akka.actor.Props;
 
 import it.unitn.ds1.Helpers.SenderHelper;
 import it.unitn.ds1.Messages.*;
-import it.unitn.ds1.Models.MessageQueue;
 import it.unitn.ds1.Models.State;
 import it.unitn.ds1.Models.View;
 import org.apache.log4j.Logger;
-import scala.concurrent.duration.Duration;
+import scala.util.control.Exception;
 
 /**
     Actor class
@@ -25,7 +19,7 @@ public abstract class Actor extends AbstractActor {
 
 		// The table of all nodes in the system id->ref
 		public View view;
-		protected View proposedView;
+		public View proposedView;
 
 		protected String groupManagerHostPath = null;
 		protected int id;
@@ -36,7 +30,7 @@ public abstract class Actor extends AbstractActor {
 		protected HashMap<Integer, Set<Integer>> flushes;
 		protected Thread keyListenerThread;
 		protected boolean chatMessageLoopStarted;
-		protected SenderHelper senderHelperLog;
+		protected SenderHelper senderHelper;
 
         abstract void crash(int time);
 
@@ -53,7 +47,7 @@ public abstract class Actor extends AbstractActor {
 			this.msgDelivered = new HashSet<>();
 			this.flushes = new HashMap<> ();
 			this.chatMessageLoopStarted = false;
-			this.senderHelperLog = new SenderHelper(this, true);
+			this.senderHelper = new SenderHelper(this, true);
 			this.keyListenerThread  = new Thread(() -> {
 				while (true){
 					Scanner keyboard = new Scanner(System.in);
@@ -76,16 +70,16 @@ public abstract class Actor extends AbstractActor {
 			});
 		}
 
-        @Override
-        public void preStart() {
-            try {
-                super.preStart();
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        }
+		@Override
+		public void preStart() {
+			try {
+				super.preStart();
+			} catch (java.lang.Exception e) {
+				e.printStackTrace();
+			}
+		}
 
-    /**
+	/**
          * Callback: on receiving of a new SendNewChatMessage
          * It create and enque a new ChatMessage
          * @param message
@@ -94,9 +88,9 @@ public abstract class Actor extends AbstractActor {
             if (this.state == State.CRASHED) return;
 
             if (state == State.NORMAL && this.view.getMembers().size() > 1){
-		        senderHelperLog.enqMulticast(new ChatMessage(this.id, this.contentCounter++), this.view.getMembers(), -1, true);
+		        senderHelper.enqMulticast(new ChatMessage(this.id, this.contentCounter++), -1, true);
             }
-            senderHelperLog.scheduleControlMessage(message, 15000);
+            senderHelper.scheduleControlMessage(message, 15000);
         }
 
 		/**
@@ -158,7 +152,7 @@ public abstract class Actor extends AbstractActor {
 					this.id, this.view.getMembers().keySet().toString(), this.view.getId()));
 
 			for (Message m : this.msgBuffer){
-				this.senderHelperLog.enqMulticast(m, this.view.getMembers(),  -1, true);
+				this.senderHelper.enqMulticast(m,  -1, true);
 			}
 		}
 
@@ -177,7 +171,7 @@ public abstract class Actor extends AbstractActor {
 
         private void startChatMessageLoop() {
 		    if (!this.chatMessageLoopStarted){
-                senderHelperLog.scheduleControlMessage(new SendNewChatMessage(this.id), 2000);
+                senderHelper.scheduleControlMessage(new SendNewChatMessage(this.id), 2000);
 		        this.chatMessageLoopStarted = true;
             }
         }
@@ -189,12 +183,25 @@ public abstract class Actor extends AbstractActor {
 		 */
 		protected void onViewChangeMessage(ViewChangeMessage message) {
 			if (this.state == State.CRASHED) return;
+			if (this.proposedView != null && message.view.getId() < this.proposedView.getId()) return;
 
 			logger.info(String.format("[%d <- 0] Received a request for new view %d", this.id,
 					message.view.getId()));
 
 			this.state = State.PAUSE;
+
+			// from now on, no new chatmessage are inserted in the queue
+			// to ensure that the senderHelper will no enque and send other
+			// chatmessage before a new view is installed, we remove all
+			// chat messages previous enqueued in the send queue
+			this.senderHelper.removeChatMessages();
+
+			// Set the proposed view
 			this.proposedView = message.view;
+
+			// Init the flushes list for the proposedView
+			this.flushes.put(this.proposedView.getId(), new HashSet<>());
+
 
 			if (this.msgBuffer.size() > 0){
 				// Or we are a new node
@@ -202,6 +209,8 @@ public abstract class Actor extends AbstractActor {
 				// sendUnstableMessages();
 			}
 
+			// New flushes messages will be the next messages to be
+			// dequeued from the sender queue
 			sendFlush();
 		}
 
@@ -210,15 +219,9 @@ public abstract class Actor extends AbstractActor {
 		 * Initialize flush list and schedule a SendFlushMessage
 		 */
 		protected void sendFlush(){
-
-			// Init the flushes list for the proposedView
-			if (this.flushes.get(this.proposedView.getId()) == null){
-				this.flushes.put(this.proposedView.getId(), new HashSet<>());
-			}
-
 			// Send in multicast the flush message
             FlushMessage fm = new FlushMessage(this.id, this.proposedView.getId());
-            this.senderHelperLog.enqMulticast(fm, this.proposedView.getMembers(), -1, true);
+            this.senderHelper.enqMulticast(fm, -1, true);
 		}
 
 		/**
@@ -258,8 +261,6 @@ public abstract class Actor extends AbstractActor {
 		protected void onHeartBeatMessage(HeartBeatMessage message) {
 			if (this.state == State.CRASHED) return;
             HeartBeatMessage hbm = new HeartBeatMessage(this.id);
-            Map<Integer, ActorRef> receiver = new HashMap<>();
-            receiver.put(0, getSender());
-            this.senderHelperLog.enqMulticast(hbm, receiver, 3000, true);
+			senderHelper.enqMessage(hbm, getSender(), 0, 3000, true);
 		}
 }

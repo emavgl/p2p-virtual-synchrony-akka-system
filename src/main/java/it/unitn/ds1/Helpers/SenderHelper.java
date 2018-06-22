@@ -35,13 +35,9 @@ public class SenderHelper {
         this.state = State.NORMAL;
     }
 
-    public void enqMulticast(Message m, Map<Integer, ActorRef> receivers, int milliseconds, boolean shoudLog) {
-        this.messageQueue.add(new MessageRequest(m, receivers, milliseconds, shoudLog));
+    public void enqMulticast(Message m, int milliseconds, boolean shoudLog) {
+        this.messageQueue.add(new MessageRequest(m, null, milliseconds, shoudLog));
         if (this.state == State.NORMAL) this.sendNextMessage();
-    }
-
-    public void enqMulticast(Message m, Map<Integer, ActorRef> receivers) {
-        this.enqMulticast(m, receivers, -1, true);
     }
 
     private void sendNextMessage(){
@@ -57,30 +53,50 @@ public class SenderHelper {
     }
 
     private void scheduleMessages(MessageRequest mr){
-        Message m = mr.m;
-        Set<Map.Entry<Integer, ActorRef>> entries = mr.receivers.entrySet();
         Set<Integer> sent = new HashSet<>();
-        String messageType = m.getClass().getSimpleName();;
+        String messageType = mr.m.getClass().getSimpleName();
         String contentStr = "";
         String viewIdStr = "";
+        Map<Integer, ActorRef> receivers = new HashMap<>();
 
-        if (messageType.toLowerCase().contains("chat")) {
+        // Set content if it is in the message
+        if (mr.m instanceof ChatMessage) {
             int content = ((ChatMessage)(mr.m)).content;
             contentStr = String.valueOf(content);
         }
 
+        // Set view and receivers
         if (actor.view != null){
             final int currentViewId = actor.view.getId();
             mr.m.viewId = currentViewId;
             viewIdStr = String.valueOf(currentViewId);
         }
 
+        // === Get the multicast receivers
+        // If actor.proposedView is not null, we are in pause, we must send heartbeat and flushes
+        // to all the nodes in the proposedview, to the view otherwise.
+        // no chatmessage will be delivered to member of the proposedview, since
+        // we will be in pause, until the next view installation
+
+        if (mr.receivers == null) {
+            // Multicast
+            if (actor.proposedView != null){
+                receivers.putAll(actor.proposedView.getMembers());
+            } else {
+                receivers.putAll(actor.view.getMembers());
+            }
+        } else {
+            // Not multicast
+            receivers.putAll(mr.receivers);
+        }
+
         final String messageContent = contentStr;
         final String viewId = viewIdStr;
+        Set<Map.Entry<Integer, ActorRef>> entries = receivers.entrySet();
 
         if (mr.shoudLog) {
             logger.info(String.format("[%d -> %s] sent %s (c: %s) within %s",
-                    m.senderId, mr.receivers.keySet().toString(), messageType, messageContent, viewId));
+                    mr.m.senderId, receivers.keySet().toString(), messageType, messageContent, viewId));
         }
 
         for (Map.Entry<Integer, ActorRef> entry : entries) {
@@ -100,7 +116,7 @@ public class SenderHelper {
                             }
                             */
 
-                            entry.getValue().tell(m, actor.getSelf());
+                            entry.getValue().tell(mr.m, actor.getSelf());
                             sent.add(entry.getKey());
 
                             if (sent.size() == entries.size()){
@@ -122,5 +138,16 @@ public class SenderHelper {
                         actor.getSelf().tell(m, actor.getSelf());
                     }
                 }, this.system.dispatcher());
+    }
+
+    public void enqMessage(Message m, ActorRef receiver, int receiverId, int milliseconds, boolean shoudLog) {
+        Map<Integer, ActorRef> receivers = new HashMap<>();
+        receivers.put(receiverId, receiver);
+        this.messageQueue.add(new MessageRequest(m, receivers, milliseconds, shoudLog));
+        if (this.state == State.NORMAL) this.sendNextMessage();
+    }
+
+    public void removeChatMessages(){
+        this.messageQueue.removeChatMessages();
     }
 }

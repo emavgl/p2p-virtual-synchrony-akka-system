@@ -5,11 +5,9 @@ import akka.actor.Props;
 import it.unitn.ds1.Messages.*;
 import it.unitn.ds1.Models.State;
 import it.unitn.ds1.Models.View;
-import scala.util.control.Exception;
 
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Random;
 import java.util.Set;
 
 public class GroupManager extends Actor {
@@ -30,7 +28,7 @@ public class GroupManager extends Actor {
     protected void init() {
         super.init();
         this.memberIdCounter = 1;
-        this.timeoutThreshold = 5;
+        this.timeoutThreshold = 7;
     }
 
     @Override
@@ -109,13 +107,13 @@ public class GroupManager extends Actor {
      * @param v: View -- The new view to be proposed
      */
     private void newViewRequest(View v){
-        logger.info(String.format("[0] - [-> %s] schedule new view %d request",
+        logger.info(String.format("[0 -> %s] schedule new view %d request",
                 v.getMembers().keySet().toString(),
                 v.getId()
         ));
 
         this.proposedView = v;
-        this.senderHelperLog.enqMulticast(new ViewChangeMessage(this.id, v), v.getMembers(), -1, true);
+        this.senderHelper.enqMulticast(new ViewChangeMessage(this.id, v), -1, true);
     }
 
     /**
@@ -169,7 +167,7 @@ public class GroupManager extends Actor {
 
             // Schedule a new HeartBeat Multicast to be sent after 1000 seconds
             // logger.info(String.format("[0 -> %s] scheduling heartbeat", this.view.getMembers().keySet().toString()));
-            this.senderHelperLog.enqMulticast(new HeartBeatMessage(this.id), this.view.getMembers(), 3000, false);
+            this.senderHelper.enqMulticast(new HeartBeatMessage(this.id), 3000, false);
         }
     }
 
