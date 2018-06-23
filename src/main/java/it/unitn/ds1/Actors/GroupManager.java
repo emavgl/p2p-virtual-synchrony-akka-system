@@ -7,6 +7,7 @@ import it.unitn.ds1.Models.State;
 import it.unitn.ds1.Models.View;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
@@ -99,6 +100,9 @@ public class GroupManager extends Actor {
             newView = this.view.addNode(newId, sender);
         }
 
+        // Initialize flushes for this view
+        this.flushes.put(newView.getId(), new HashSet<>());
+
         this.newViewRequest(newView);
     }
 
@@ -107,11 +111,6 @@ public class GroupManager extends Actor {
      * @param v: View -- The new view to be proposed
      */
     private void newViewRequest(View v){
-        logger.info(String.format("[0 -> %s] schedule new view %d request",
-                v.getMembers().keySet().toString(),
-                v.getId()
-        ));
-
         this.proposedView = v;
         this.senderHelper.enqMulticast(new ViewChangeMessage(this.id, v), -1, true);
     }
