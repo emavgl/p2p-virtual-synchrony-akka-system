@@ -11,12 +11,14 @@ public class MessageRequest {
     public int milliseconds;
     public int maxTime = 15000;
     public boolean shoudLog;
+    public boolean shouldCrash;
 
     public MessageRequest(Message m, Map<Integer, ActorRef> receivers, int milliseconds, boolean shoudLog){
         this.m = m;
         this.receivers = receivers;
         this.milliseconds = milliseconds;
         this.shoudLog = shoudLog;
+        this.shouldCrash = false;
         if (this.milliseconds == -1){
             this.milliseconds = maxTime;
         }

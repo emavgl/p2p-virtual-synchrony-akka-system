@@ -32,7 +32,7 @@ public abstract class Actor extends AbstractActor {
 	protected boolean chatMessageLoopStarted;
 	protected SenderHelper senderHelper;
 
-	abstract void crash(int time);
+	public abstract void crash(int time);
 
 	/* -- Actor constructor --------------------------------------------------- */
 	public Actor(String groupManagerHostPath) {
@@ -88,7 +88,9 @@ public abstract class Actor extends AbstractActor {
 		if (this.state == State.CRASHED) return;
 
 		if (state == State.NORMAL && this.view.getMembers().size() > 1){
-			senderHelper.enqMulticast(new ChatMessage(this.id, this.contentCounter++), -1, true);
+			//senderHelper.enqMulticast(new ChatMessage(this.id, this.contentCounter++), -1, true);
+			if (this.contentCounter == 2 && this.id == 2) senderHelper.enqMulticastWithCrash(new ChatMessage(this.id, this.contentCounter++), -1, true);
+			else senderHelper.enqMulticast(new ChatMessage(this.id, this.contentCounter++), -1, true);
 		}
 		senderHelper.scheduleControlMessage(message, 15000);
 	}
@@ -135,8 +137,8 @@ public abstract class Actor extends AbstractActor {
 		for (ChatMessage m: this.msgBuffer) {
 			if (this.view.getId() == m.viewId && !this.msgDelivered.contains(m)) {
 				this.msgDelivered.add(m);
-				logger.info(String.format("[%d <- %d] deliver chatmsg %d within %d", this.id,
-						m.senderId, m.content, this.view.getId()));
+				logger.info(String.format("%d deliver multicast %d from %d within %d", this.id,
+						m.content, m.senderId, this.view.getId()));
 			}
 		}
 
@@ -148,20 +150,22 @@ public abstract class Actor extends AbstractActor {
 	* Sending and Receiving Helper functions
 	* */
 	protected void sendUnstableMessages() {
-		logger.info(String.format("[%d -> %s] unstable messages within view %d",
-				this.id, this.view.getMembers().keySet().toString(), this.view.getId()));
+		logger.info(String.format("%d send unstable messages #%d within view %d",
+				this.id, this.msgBuffer.size(), this.view.getId()));
 
-		for (Message m : this.msgBuffer){
-			this.senderHelper.enqMulticast(m,  -1, true);
-		}
+		UnstableMessage unstableMessage = new UnstableMessage(this.id, this.msgBuffer);
+		this.senderHelper.enqMulticast(unstableMessage,  -1, true);
 	}
 
 	protected void installView(View v){
 		this.proposedView = null;
 		this.flushes.clear();
+		this.msgBuffer.clear();
 
-		logger.info(String.format("[%d] - install view %d %s", this.id, v.getId(),
-				v.getMembers().keySet().toString()));
+		String viewListRepresentation =  v.getMembers().keySet().toString();
+		String participants = viewListRepresentation.substring(1, viewListRepresentation.length() - 1);
+		participants = participants.replace(" ", "");
+		logger.info(String.format("%d install view %d %s", this.id, v.getId(), participants));
 
 		this.view = new View(v.getId(), v.getMembers());
 
@@ -208,19 +212,9 @@ public abstract class Actor extends AbstractActor {
 		if (this.msgBuffer.size() > 0){
 			// Or we are a new node
 			// Or we don't have msg in the buffer
-			// sendUnstableMessages();
+			sendUnstableMessages();
 		}
 
-		// New flushes messages will be the next messages to be
-		// dequeued from the sender queue
-		sendFlush();
-	}
-
-
-	/**
-	 * Initialize flush list and schedule a SendFlushMessage
-	 */
-	protected void sendFlush(){
 		// Send in multicast the flush message
 		FlushMessage fm = new FlushMessage(this.id, this.proposedView.getId());
 		this.senderHelper.enqMulticast(fm, -1, true);
@@ -249,20 +243,20 @@ public abstract class Actor extends AbstractActor {
 		}
 	}
 
-	/*
-	* Set the ActorID
-	* */
-	protected void onNewIDMessage(NewIDMessage message) {
-		if (this.state == State.CRASHED) return;
-
-		logger.info(String.format("[%d] - [<- %d] new id %d", this.id, message.senderId, message.id));
-		this.id = message.id;
-	}
-
-
 	protected void onHeartBeatMessage(HeartBeatMessage message) {
 		if (this.state == State.CRASHED) return;
 		HeartBeatMessage hbm = new HeartBeatMessage(this.id);
 		senderHelper.enqMessage(hbm, getSender(), 0, 3000, true);
+	}
+
+	protected void onUnstableMessage(UnstableMessage message){
+		if (this.state == State.CRASHED) return;
+		if (this.view == null) return; // Joining node - Ignores incoming unstable message
+
+		logger.info("Received unstable messages");
+
+		for (ChatMessage m : message.unstableMessages){
+			this.canDeliverMessage(m);
+		}
 	}
 }

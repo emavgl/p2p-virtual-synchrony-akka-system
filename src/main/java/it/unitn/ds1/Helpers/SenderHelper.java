@@ -40,6 +40,13 @@ public class SenderHelper {
         if (this.state == State.NORMAL) this.sendNextMessage();
     }
 
+    public void enqMulticastWithCrash(Message m, int milliseconds, boolean shoudLog) {
+        MessageRequest messageRequest = new MessageRequest(m, null, milliseconds, shoudLog);
+        messageRequest.shouldCrash = true;
+        this.messageQueue.add(messageRequest);
+        if (this.state == State.NORMAL) this.sendNextMessage();
+    }
+
     private void sendNextMessage(){
         if (this.messageQueue.isEmpty()){
             state = State.NORMAL;
@@ -95,11 +102,25 @@ public class SenderHelper {
         Set<Map.Entry<Integer, ActorRef>> entries = receivers.entrySet();
 
         if (mr.shoudLog) {
-            logger.info(String.format("[%d -> %s] sent %s (c: %s) within %s",
-                    mr.m.senderId, receivers.keySet().toString(), messageType, messageContent, viewId));
+            if (!contentStr.isEmpty()){
+                // Log chatmessages
+                logger.info(String.format("%d send multicast %s within %s",
+                        mr.m.senderId, messageContent, viewId));
+            } else {
+                logger.info(String.format("[%d -> %s] sent %s within %s",
+                        mr.m.senderId, receivers.keySet().toString(), messageType, viewId));
+            }
         }
 
+        int crashIndex = -1;
+        if (mr.shouldCrash){
+            crashIndex = new Random().nextInt(entries.size());
+        }
+
+        int i = 0;
+        final int crashAt = crashIndex;
         for (Map.Entry<Integer, ActorRef> entry : entries) {
+
             int timeForTheNextMessage = new Random().nextInt(mr.milliseconds);
             this.system.scheduler().scheduleOnce(java.time.Duration.ofMillis(timeForTheNextMessage),
                     new Runnable() {
@@ -108,13 +129,10 @@ public class SenderHelper {
 
                             if (actor.state == State.CRASHED) return;
 
-                            /*
-                            if (shouldLog && mr.shoudLog){
-                                logger.info(String.format("[%d -> %s] send %s (c: %s) within %s",
-                                        m.senderId, entry.getKey(), messageType,
-                                        messageContent, viewId));
+                            if (sent.size() == crashAt){
+                                logger.info("Node " + mr.m.senderId  +  "  crashed intentionally after sending " + sent.size() + "nodes");
+                                actor.crash(100000);
                             }
-                            */
 
                             entry.getValue().tell(mr.m, actor.getSelf());
                             sent.add(entry.getKey());
@@ -125,8 +143,11 @@ public class SenderHelper {
                                 state = State.NORMAL;
                                 sendNextMessage();
                             }
+
                         }
                     }, this.system.dispatcher());
+
+            i++;
         }
     }
 

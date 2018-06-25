@@ -32,7 +32,7 @@ public class GroupMember extends Actor {
      * Status Helper Functions
      * */
     @Override
-    protected void crash(int recoveryTime) {
+    public void crash(int recoveryTime) {
         this.state = State.CRASHED;
         logger.info(String.format("[%d] - CRASH!!!", this.id));
         this.senderHelper.scheduleControlMessage(new RecoveryMessage(this.id), recoveryTime);
@@ -67,6 +67,15 @@ public class GroupMember extends Actor {
         return Props.create(GroupMember.class, () -> new GroupMember(remotePath));
     }
 
+    /*
+     * Set the ActorID
+     * */
+    protected void onNewIDMessage(NewIDMessage message) {
+        if (this.state == State.CRASHED) return;
+        logger.info(String.format("[%d] - [<- %d] new id %d", this.id, message.senderId, message.id));
+        this.id = message.id;
+    }
+
     /**
      Registers callbacks
      */
@@ -80,6 +89,7 @@ public class GroupMember extends Actor {
                 .match(HeartBeatMessage.class, this::onHeartBeatMessage)
                 .match(RecoveryMessage.class, this::onRecoveryMessage)
                 .match(SendNewChatMessage.class, this::onSendNewChatMessage)
+                .match(UnstableMessage.class, this::onUnstableMessage)
                 .build();
     }
 }

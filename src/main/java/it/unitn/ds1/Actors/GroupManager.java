@@ -40,7 +40,7 @@ public class GroupManager extends Actor {
     }
 
     @Override
-    void crash(int time) {
+    public void crash(int time) {
         // Nothing
         // Group manager cannot crash
     }
@@ -100,9 +100,6 @@ public class GroupManager extends Actor {
             newView = this.view.addNode(newId, sender);
         }
 
-        // Initialize flushes for this view
-        this.flushes.put(newView.getId(), new HashSet<>());
-
         this.newViewRequest(newView);
     }
 
@@ -111,6 +108,9 @@ public class GroupManager extends Actor {
      * @param v: View -- The new view to be proposed
      */
     private void newViewRequest(View v){
+        // Initialize flushes for this view
+        this.flushes.put(v.getId(), new HashSet<>());
+
         this.proposedView = v;
         this.senderHelper.enqMulticast(new ViewChangeMessage(this.id, v), -1, true);
     }
@@ -182,6 +182,7 @@ public class GroupManager extends Actor {
                 .match(FlushMessage.class, this::onFlushMessage)
                 .match(HeartBeatMessage.class, this::onHeartBeatMessage)
                 .match(SendNewChatMessage.class, this::onSendNewChatMessage)
+                .match(UnstableMessage.class, this::onUnstableMessage)
                 .build();
     }
 }
