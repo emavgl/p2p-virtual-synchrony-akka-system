@@ -321,7 +321,7 @@ public abstract class Actor extends AbstractActor {
 			Set<Integer> requestInstalledViewConfirmation = this.installConfirmations.get(this.view.getId());
 			boolean complete = requestInstalledViewConfirmation.equals(this.view.getMembers().keySet());
 			if (complete) {
-				logger.info(String.format("%d is sure that all node have installed the view %d, start!",
+				logger.info(String.format("%d is sure that all the nodes have installed the view %d, start!",
 						this.id, message.viewId));
 				this.state = State.NORMAL;
 				this.startChatMessageLoop();
