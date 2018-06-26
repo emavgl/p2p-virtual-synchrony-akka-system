@@ -63,7 +63,9 @@ public class GroupManager extends Actor {
         // All the nodes will have an initial counter set to 0
         this.heartBeatCounter = new HashMap<>();
         for (Integer nodeId : v.getMembers().keySet()){
-            this.heartBeatCounter.put(nodeId, 0);
+            if (this.heartBeatCounter.get(nodeId) == null){
+                this.heartBeatCounter.put(nodeId, 0);
+            }
         }
 
         if (!this.heartBeatLoopStarted){
@@ -110,6 +112,7 @@ public class GroupManager extends Actor {
     private void newViewRequest(View v){
         // Initialize flushes for this view
         this.flushes.put(v.getId(), new HashSet<>());
+        this.initializeHeartBeatCounter(v);
 
         this.proposedView = v;
         this.senderHelper.enqMulticast(new ViewChangeMessage(this.id, v), -1, true);

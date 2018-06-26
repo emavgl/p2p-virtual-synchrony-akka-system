@@ -88,9 +88,11 @@ public abstract class Actor extends AbstractActor {
 		if (this.state == State.CRASHED) return;
 
 		if (state == State.NORMAL && this.view.getMembers().size() > 1){
-			//senderHelper.enqMulticast(new ChatMessage(this.id, this.contentCounter++), -1, true);
-			if (this.contentCounter == 2 && this.id == 2) senderHelper.enqMulticastWithCrash(new ChatMessage(this.id, this.contentCounter++), -1, true);
-			else senderHelper.enqMulticast(new ChatMessage(this.id, this.contentCounter++), -1, true);
+			senderHelper.enqMulticast(new ChatMessage(this.id, this.contentCounter++), -1, true);
+
+			// TODO: FOR CRASH TESTING
+			//if (this.contentCounter == 2 && this.id == 2) senderHelper.enqMulticastWithCrash(new ChatMessage(this.id, this.contentCounter++), -1, true);
+			//else senderHelper.enqMulticast(new ChatMessage(this.id, this.contentCounter++), -1, true);
 		}
 		senderHelper.scheduleControlMessage(message, 15000);
 	}
@@ -129,6 +131,15 @@ public abstract class Actor extends AbstractActor {
 			}
 		}
 
+		// TODO: FOR CRASH TESTING
+		/*
+		if (this.id == 1 && message.content == 2) {
+			logger.info("Intentionally crash during deliver of the message " + message.content);
+			this.crash(90000);
+			return;
+		}
+		*/
+
 		// If here, the viewId matches
 		// Add to the msgBuffer
 		this.msgBuffer.add(message);
@@ -162,6 +173,15 @@ public abstract class Actor extends AbstractActor {
 		this.flushes.clear();
 		this.msgBuffer.clear();
 
+		// TODO: FOR CRASH TESTING
+		/*
+		if (this.id == 1) {
+			logger.info("Intentionally crash during processing of the ViewChangeMessage");
+			this.crash(1000000);
+			return;
+		}
+		*/
+
 		String viewListRepresentation =  v.getMembers().keySet().toString();
 		String participants = viewListRepresentation.substring(1, viewListRepresentation.length() - 1);
 		participants = participants.replace(" ", "");
@@ -193,6 +213,15 @@ public abstract class Actor extends AbstractActor {
 				message.view.getId()));
 
 		this.state = State.PAUSE;
+
+		// TODO: FOR CRASH TESTING
+		/*
+		if (this.id == 1) {
+			logger.info("Intentionally crash during processing of the ViewChangeMessage");
+			this.crash(1000000);
+			return;
+		}
+		*/
 
 		// from now on, no new chatmessage are inserted in the queue
 		// to ensure that the senderHelper will no enque and send other
