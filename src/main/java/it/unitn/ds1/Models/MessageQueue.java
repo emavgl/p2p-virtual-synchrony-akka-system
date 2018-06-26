@@ -1,6 +1,7 @@
 package it.unitn.ds1.Models;
 
 import it.unitn.ds1.Messages.ChatMessage;
+import it.unitn.ds1.Messages.HeartBeatMessage;
 import it.unitn.ds1.Messages.Message;
 
 import java.util.LinkedList;
@@ -27,5 +28,8 @@ public class MessageQueue {
         queue.removeIf(x -> x.m instanceof ChatMessage);
     }
     public int getSize() { return this.queue.size(); }
-    public void clear() { this.queue.clear(); }
+
+    public void clear() {
+        queue.removeIf(x -> !(x.m instanceof HeartBeatMessage));
+    }
 }
