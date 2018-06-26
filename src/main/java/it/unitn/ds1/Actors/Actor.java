@@ -251,7 +251,7 @@ public abstract class Actor extends AbstractActor {
 		if (this.state == State.CRASHED) return;
 
 		// Init the flushes list for the proposedView
-		if (this.flushes.get(this.proposedView.getId()) == null){
+		if (this.proposedView != null && this.flushes.get(this.proposedView.getId()) == null){
 			this.flushes.put(this.proposedView.getId(), new HashSet<>());
 		}
 
