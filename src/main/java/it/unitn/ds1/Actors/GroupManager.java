@@ -17,7 +17,7 @@ public class GroupManager extends Actor {
     private Map<Integer, Integer> heartBeatCounter;
     private int timeoutThreshold;
     private boolean heartBeatLoopStarted = false;
-
+    protected HashMap<Integer, Set<Integer>> installConfirmations;
 
     public GroupManager(int id, String remotePath) {
         super(remotePath);
@@ -30,6 +30,7 @@ public class GroupManager extends Actor {
         super.init();
         this.memberIdCounter = 1;
         this.timeoutThreshold = 7;
+        this.installConfirmations = new HashMap<>();
     }
 
     @Override
@@ -84,6 +85,7 @@ public class GroupManager extends Actor {
     private void onRequestJoinMessage(RequestJoinMessage message) {
         // Set the state to pause
         this.state = State.PAUSE;
+        this.senderHelper.removeChatMessages();
 
         logger.info(String.format("[%d] - [<- %d] join request at view %d", this.id, message.senderId,
                 this.view.getId()));
@@ -125,6 +127,7 @@ public class GroupManager extends Actor {
      */
     private void onCrashDetected(int crashedNodeId){
         this.state = State.PAUSE;
+        this.senderHelper.removeChatMessages();
 
         logger.info(String.format("[%d] - node %d crashed within view %d", this.id,
                 crashedNodeId,
@@ -173,6 +176,35 @@ public class GroupManager extends Actor {
         }
     }
 
+    protected void onInstalledViewMessage(InstalledViewMessage message){
+        if (this.state == State.CRASHED) return;
+
+        // Initialize installConfirmations
+        if (this.installConfirmations.get(this.view.getId()) == null){
+            this.installConfirmations.put(this.view.getId(), new HashSet<>());
+        }
+
+        int senderId = message.senderId;
+        int viewId = message.viewId;
+
+        logger.info(String.format("[%d <- %d] InstalledViewMessage for view %d",
+                this.id, message.senderId, message.viewId));
+
+        Set<Integer> s = this.installConfirmations.get(viewId);
+        if (s == null) this.installConfirmations.put(viewId, new HashSet<>());
+        this.installConfirmations.get(viewId).add(senderId);
+
+        if (this.view.getId() >= viewId){
+            Set<Integer> requestInstalledViewConfirmation = this.installConfirmations.get(this.view.getId());
+            boolean complete = requestInstalledViewConfirmation.equals(this.view.getMembers().keySet());
+            if (complete) {
+                logger.info(String.format("%d is sure that all the nodes have installed the view %d, send start!",
+                        this.id, message.viewId));
+                this.senderHelper.enqMulticast(new StartChatMessage(this.id), -1, true);
+            }
+        }
+    }
+
     /**
      Registers callbacks
      */
@@ -187,6 +219,7 @@ public class GroupManager extends Actor {
                 .match(SendNewChatMessage.class, this::onSendNewChatMessage)
                 .match(UnstableMessage.class, this::onUnstableMessage)
                 .match(InstalledViewMessage.class, this::onInstalledViewMessage)
+                .match(StartChatMessage.class, this::onStartChatMessage)
                 .build();
     }
 }

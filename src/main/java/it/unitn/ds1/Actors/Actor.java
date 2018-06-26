@@ -31,7 +31,6 @@ public abstract class Actor extends AbstractActor {
 	protected Thread keyListenerThread;
 	protected boolean chatMessageLoopStarted;
 	protected SenderHelper senderHelper;
-	protected HashMap<Integer, Set<Integer>> installConfirmations;
 
 	public abstract void crash(int time);
 
@@ -48,7 +47,6 @@ public abstract class Actor extends AbstractActor {
 		this.msgDelivered = new HashSet<>();
 		this.flushes = new HashMap<> ();
 		this.chatMessageLoopStarted = false;
-		this.installConfirmations = new HashMap<>();
 		this.senderHelper = new SenderHelper(this, true);
 		this.keyListenerThread  = new Thread(() -> {
 			while (true){
@@ -191,12 +189,8 @@ public abstract class Actor extends AbstractActor {
 
 		this.view = new View(v.getId(), v.getMembers());
 
-		if (this.installConfirmations.get(this.view.getId()) == null){
-			this.installConfirmations.put(this.view.getId(), new HashSet<>());
-		}
-
 		InstalledViewMessage installedViewMessage = new InstalledViewMessage(this.id, this.view.getId());
-		this.senderHelper.enqMulticast(installedViewMessage, -1, true);
+		this.senderHelper.enqMessage(installedViewMessage, this.view.getMembers().get(0), 0, -1, true);
 	}
 
 	private void startChatMessageLoop() {
@@ -238,12 +232,6 @@ public abstract class Actor extends AbstractActor {
 		// Set the proposed view
 		this.proposedView = message.view;
 
-		// Init the flushes list for the proposedView
-		if (this.flushes.get(this.proposedView.getId()) == null){
-			this.flushes.put(this.proposedView.getId(), new HashSet<>());
-		}
-
-
 		if (this.msgBuffer.size() > 0){
 			// Or we are a new node
 			// Or we don't have msg in the buffer
@@ -261,6 +249,11 @@ public abstract class Actor extends AbstractActor {
 	 */
 	protected void onFlushMessage(FlushMessage message){
 		if (this.state == State.CRASHED) return;
+
+		// Init the flushes list for the proposedView
+		if (this.flushes.get(this.proposedView.getId()) == null){
+			this.flushes.put(this.proposedView.getId(), new HashSet<>());
+		}
 
 		logger.info(String.format("[%d <- %d] flush for view %d",
 				this.id, message.senderId, message.proposedViewId));
@@ -288,44 +281,19 @@ public abstract class Actor extends AbstractActor {
 		if (this.state == State.CRASHED) return;
 		if (this.view == null) return; // Joining node - Ignores incoming unstable message
 
-		logger.info("Received unstable messages");
+		logger.info(String.format("[%d] Received unstable messages", this.id));
 
 		for (ChatMessage m : message.unstableMessages){
 			this.canDeliverMessage(m);
 		}
 	}
 
-	protected void onInstalledViewMessage(InstalledViewMessage message){
-		if (this.state == State.CRASHED) return;
+	protected void onStartChatMessage(StartChatMessage message){
 
-		int senderId = message.senderId;
-		int viewId = message.viewId;
+		logger.info(String.format("[%d] Start message received, let's chat!", this.id));
 
-		// TODO: FOR CRASH TESTING
-		/*
-		if (this.id == 1) {
-			logger.info("Intentionally crash during onInstalledViewMessage");
-			this.crash(1000000);
-			return;
-		}
-		*/
-
-		logger.info(String.format("[%d <- %d] InstalledViewMessage for view %d",
-				this.id, message.senderId, message.viewId));
-
-		Set<Integer> s = this.installConfirmations.get(viewId);
-		if (s == null) this.installConfirmations.put(viewId, new HashSet<>());
-		this.installConfirmations.get(viewId).add(senderId);
-
-		if (this.view.getId() >= viewId){
-			Set<Integer> requestInstalledViewConfirmation = this.installConfirmations.get(this.view.getId());
-			boolean complete = requestInstalledViewConfirmation.equals(this.view.getMembers().keySet());
-			if (complete) {
-				logger.info(String.format("%d is sure that all the nodes have installed the view %d, start!",
-						this.id, message.viewId));
-				this.state = State.NORMAL;
-				this.startChatMessageLoop();
-			}
-		}
+		this.state = State.NORMAL;
+		this.startChatMessageLoop();
 	}
+
 }
