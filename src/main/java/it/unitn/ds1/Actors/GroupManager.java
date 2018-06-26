@@ -186,6 +186,7 @@ public class GroupManager extends Actor {
                 .match(HeartBeatMessage.class, this::onHeartBeatMessage)
                 .match(SendNewChatMessage.class, this::onSendNewChatMessage)
                 .match(UnstableMessage.class, this::onUnstableMessage)
+                .match(InstalledViewMessage.class, this::onInstalledViewMessage)
                 .build();
     }
 }

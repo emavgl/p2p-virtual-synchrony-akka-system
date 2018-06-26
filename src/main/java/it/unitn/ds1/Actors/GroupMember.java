@@ -90,6 +90,7 @@ public class GroupMember extends Actor {
                 .match(RecoveryMessage.class, this::onRecoveryMessage)
                 .match(SendNewChatMessage.class, this::onSendNewChatMessage)
                 .match(UnstableMessage.class, this::onUnstableMessage)
+                .match(InstalledViewMessage.class, this::onInstalledViewMessage)
                 .build();
     }
 }
