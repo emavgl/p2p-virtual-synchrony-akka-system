@@ -85,7 +85,7 @@ public class GroupManager extends Actor {
     private void onRequestJoinMessage(RequestJoinMessage message) {
         // Set the state to pause
         this.state = State.PAUSE;
-        this.senderHelper.removeChatMessages();
+        this.senderHelper.removeAllMessages();
 
         logger.info(String.format("[%d] - [<- %d] join request at view %d", this.id, message.senderId,
                 this.view.getId()));
@@ -127,7 +127,7 @@ public class GroupManager extends Actor {
      */
     private void onCrashDetected(int crashedNodeId){
         this.state = State.PAUSE;
-        this.senderHelper.removeChatMessages();
+        this.senderHelper.removeAllMessages();
 
         logger.info(String.format("[%d] - node %d crashed within view %d", this.id,
                 crashedNodeId,

@@ -171,4 +171,7 @@ public class SenderHelper {
     public void removeChatMessages(){
         this.messageQueue.removeChatMessages();
     }
+    public void removeAllMessages() {
+        this.messageQueue.clear();
+    }
 }

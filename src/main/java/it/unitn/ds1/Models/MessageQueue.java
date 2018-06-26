@@ -26,6 +26,6 @@ public class MessageQueue {
     public void removeChatMessages() {
         queue.removeIf(x -> x.m instanceof ChatMessage);
     }
-
     public int getSize() { return this.queue.size(); }
+    public void clear() { this.queue.clear(); }
 }
