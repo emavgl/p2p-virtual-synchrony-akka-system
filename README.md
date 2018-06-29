@@ -7,7 +7,3 @@
 
 Group Manager has an assigned ID = 0
 All the other group member has an initial unassigned ID = -1
-
-## Todo
-- Every new node should ask to the group manager for an ID
-
