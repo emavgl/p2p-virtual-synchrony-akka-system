@@ -194,6 +194,8 @@ public class GroupManager extends Actor {
         if (s == null) this.installConfirmations.put(viewId, new HashSet<>());
         this.installConfirmations.get(viewId).add(senderId);
 
+        if (this.proposedView != null) return;
+
         if (this.view.getId() >= viewId){
             Set<Integer> requestInstalledViewConfirmation = this.installConfirmations.get(this.view.getId());
             boolean complete = requestInstalledViewConfirmation.equals(this.view.getMembers().keySet());

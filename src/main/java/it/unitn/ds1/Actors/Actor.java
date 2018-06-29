@@ -284,11 +284,18 @@ public abstract class Actor extends AbstractActor {
 		logger.info(String.format("[%d] Received unstable messages", this.id));
 
 		for (ChatMessage m : message.unstableMessages){
-			this.canDeliverMessage(m);
+			if (this.view.getId() == m.viewId && !this.msgDelivered.contains(m)) {
+				this.msgDelivered.add(m);
+				logger.info(String.format("%d deliver multicast %d from %d within %d", this.id,
+						m.content, m.senderId, this.view.getId()));
+			}
 		}
 	}
 
 	protected void onStartChatMessage(StartChatMessage message){
+		// if one of these happen, it means that something went wrong
+		// ignore the message, otherwise the node will crash
+		if (this.state == State.CRASHED || this.view == null || this.proposedView != null) return;
 
 		logger.info(String.format("[%d] Start message received, let's chat!", this.id));
 
